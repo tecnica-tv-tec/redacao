@@ -1,0 +1,11 @@
+{
+  "name": "redacao-newsroom",
+  "version": "1.0.0",
+  "description": "Sistema SaaS de produção de pautas e espelho de telejornal (inspirado no Avid iNews)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": { "node": ">=18" },
+  "license": "UNLICENSED"
+}

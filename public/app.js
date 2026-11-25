@@ -1,0 +1,1880 @@
+/* Redação — cliente SPA (sem frameworks) */
+'use strict';
+
+// =============================================================== utilidades
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const today = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
+const addDays = (iso, n) => { const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+const fmtDate = (iso) => { if (!iso) return ''; const [y, m, d] = iso.split('-'); return `${d}/${m}/${y}`; };
+const weekday = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long' });
+const fmtDT = (iso) => iso ? new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+const initials = (n) => String(n || '?').split(/\s+/).map(x => x[0]).slice(0, 2).join('').toUpperCase();
+
+function toSec(v) {
+  if (v == null || v === '') return 0;
+  const s = String(v).trim();
+  if (/^\d+$/.test(s)) return Number(s);
+  const parts = s.split(':').map(Number);
+  if (parts.some(isNaN)) return 0;
+  return parts.reduce((acc, p) => acc * 60 + p, 0);
+}
+function fmtDur(sec, hours = false) {
+  const neg = sec < 0; sec = Math.abs(Math.round(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  const pad = (n) => String(n).padStart(2, '0');
+  const out = (hours || h) ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+  return (neg ? '-' : '') + out;
+}
+function fmtClock(sec) {
+  sec = ((Math.round(sec) % 86400) + 86400) % 86400;
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(Math.floor(sec / 3600))}:${pad(Math.floor(sec % 3600 / 60))}:${pad(sec % 60)}`;
+}
+// Tempo de leitura: ignora instruções entre colchetes [ ] (como no iNews)
+function wordCount(text) {
+  return String(text || '').replace(/\[[^\]]*\]/g, ' ').split(/\s+/).filter(w => /[\p{L}\p{N}]/u.test(w)).length;
+}
+const readSec = (text, wpm) => Math.round(wordCount(text) * 60 / (wpm || 170));
+
+// Modo de dados: Supabase (produção SaaS) ou servidor local (demonstração)
+const CFG = window.REDACAO_CONFIG || {};
+const SUPA_MODE = !!(CFG.supabaseUrl && CFG.supabaseAnonKey);
+let SUPA = null;
+function loadScript(src) { return new Promise((ok, ko) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = () => ko(new Error('Falha ao carregar ' + src)); document.head.appendChild(s); }); }
+async function initSupabase() {
+  if (!SUPA_MODE || SUPA) return;
+  await loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js');
+  const client = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+  SUPA = window.createSupabaseAdapter(client);
+  client.auth.onAuthStateChange((event) => { if (event === 'PASSWORD_RECOVERY') setTimeout(recoverPassword, 300); });
+}
+function recoverPassword() {
+  const md = modal('Definir nova senha', `<form id="rcf"><div class="field"><label>Nova senha (mín. 8 caracteres)</label><input type="password" name="password" minlength="8" required autocomplete="new-password"></div><div class="err" id="rcerr"></div><button class="btn primary">Salvar senha</button></form>`);
+  $('#rcf', md.el).onsubmit = async (e) => {
+    e.preventDefault();
+    try { await api('POST', '/api/auth/recover', Object.fromEntries(new FormData(e.target))); md.close(); toast('Senha definida.'); boot(); }
+    catch (er) { $('#rcerr', md.el).textContent = er.message; }
+  };
+}
+async function api(method, url, body) {
+  if (SUPA_MODE) {
+    await initSupabase();
+    try { return await SUPA.request(method, url, body); }
+    catch (e) {
+      if (e.status === 401 && url !== '/api/me' && !url.startsWith('/api/auth/')) { S.me = null; renderLogin(); }
+      throw e;
+    }
+  }
+  const r = await fetch(url, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined, credentials: 'same-origin' });
+  let data = null; try { data = await r.json(); } catch { /* vazio */ }
+  if (r.status === 401 && url !== '/api/me' && url !== '/api/auth/login') { S.me = null; renderLogin(); throw new Error('Sessão expirada.'); }
+  if (!r.ok) { const e = new Error((data && data.error) || 'Erro de comunicação.'); e.status = r.status; throw e; }
+  return data;
+}
+function toast(msg, isErr) {
+  const t = document.createElement('div'); t.className = 't' + (isErr ? ' e' : ''); t.textContent = msg;
+  $('#toast').appendChild(t); setTimeout(() => t.remove(), isErr ? 5000 : 2600);
+}
+function modal(title, bodyHtml, { wide, footer } = {}) {
+  const bg = document.createElement('div'); bg.className = 'modal-bg';
+  bg.innerHTML = `<div class="modal ${wide ? 'wide' : ''}" role="dialog" aria-modal="true"><div class="modal-h"><h3>${esc(title)}</h3><button class="x" data-close aria-label="Fechar">×</button></div><div class="modal-b">${bodyHtml}</div>${footer ? `<div class="modal-f">${footer}</div>` : ''}</div>`;
+  const close = () => bg.remove();
+  bg.addEventListener('click', e => { if (e.target === bg || e.target.closest('[data-close]')) close(); });
+  document.body.appendChild(bg);
+  const f = bg.querySelector('input,select,textarea'); if (f) f.focus();
+  return { el: bg, close };
+}
+
+// =============================================================== constantes do domínio
+const EDITORIAS = ['Cidade', 'Política', 'Economia', 'Polícia', 'Saúde', 'Educação', 'Esporte', 'Cultura', 'Tempo', 'Trânsito', 'Nacional', 'Internacional', 'Serviço', 'Comunidade'];
+const PAUTA_STATUS = [
+  ['sugestao', 'Sugestão'], ['em_apuracao', 'Em apuração'], ['em_producao', 'Em produção'], ['pronta', 'Pronta p/ gravar'],
+  ['gravada', 'Gravada'], ['exibida', 'Exibida'], ['caiu', 'Caiu'],
+];
+const MATERIA_STATUS = [['', 'Não iniciada'], ['rascunho', 'Em redação'], ['enviada', 'Enviada p/ edição'], ['revisada', 'Revisada'], ['aprovada', 'Aprovada']];
+// palavras e tempo estimado de narração (ignora marcações entre colchetes)
+function materiaStats(text) {
+  const w = wordCount(text);
+  return w ? `${w} palavras · ~${fmtDur(Math.round(w * 60 / 170))}` : '';
+}
+const MAT_CLASS = { rascunho: 'em_apuracao', enviada: 'em_producao', revisada: 'pronta', aprovada: 'gravada' };
+const materiaPill = (p) => String(p.materia || '').trim()
+  ? `<span class="pill st-${MAT_CLASS[p.materiaStatus] || 'em_apuracao'}" title="${wordCount(p.materia)} palavras">✎ ${esc(label(MATERIA_STATUS, p.materiaStatus || 'rascunho'))}</span>`
+  : '<span class="hint">—</span>';
+const PRIORIDADES = [['baixa', 'Baixa'], ['normal', 'Normal'], ['alta', 'Alta'], ['urgente', 'Urgente']];
+const FORMATOS = ['VT', 'NC', 'NOTA', 'NP', 'LINK', 'VIVO', 'SONORA', 'STAND-UP', 'ENTREVISTA', 'SÉRIE', 'ARTE'];
+const TIPOS = ['ESCALADA', 'VINHETA', 'CABEÇA', 'NOTA', 'NC', 'NP', 'VT', 'VT+NP', 'SONORA', 'LINK', 'VIVO', 'STAND-UP', 'ENTREVISTA', 'ARTE', 'CHAMADA', 'PASSAGEM', 'ENCERRAMENTO', 'INTERVALO'];
+const ITEM_STATUS = [['rascunho', 'Rascunho'], ['em_edicao', 'Em edição'], ['pronto', 'Pronto'], ['aprovado', 'Aprovado'], ['caiu', 'Caiu']];
+const RD_STATUS = [['aberto', 'ABERTO'], ['fechado', 'FECHADO'], ['no_ar', 'NO AR'], ['encerrado', 'ENCERRADO']];
+const label = (list, v) => (list.find(x => x[0] === v) || [v, v])[1];
+const opts = (list, sel) => list.map(x => Array.isArray(x) ? `<option value="${esc(x[0])}" ${x[0] === sel ? 'selected' : ''}>${esc(x[1])}</option>` : `<option ${x === sel ? 'selected' : ''}>${esc(x)}</option>`).join('');
+// tipos lidos integralmente pelo apresentador (texto também conta tempo)
+const READ_TYPES = ['NOTA', 'NC', 'NP', 'CABEÇA', 'ESCALADA', 'ENCERRAMENTO', 'CHAMADA', 'PASSAGEM'];
+
+// =============================================================== estado
+const S = {
+  me: null, org: null, perms: {}, roles: [], users: [], programs: [],
+  view: 'pautas',
+  pf: { date: today(), allDates: false, status: '', editoria: '', programaId: '', q: '', mine: false },
+  pautas: [], pauta: null, pautaDirty: false,
+  rd: { programId: '', date: today() }, rundown: null, selItem: null, itemDirty: false, itemSaveTimer: null,
+  pollTimer: null, lockTimer: null,
+};
+const userName = (id) => { const u = S.users.find(u => u.id === id); return u ? u.name : ''; };
+// repórter da pauta: usuário do sistema ou nome digitado
+const repName = (p) => userName(p.reporterId) || p.reporterNome || '';
+
+// =============================================================== login
+function renderLogin(mode = 'login') {
+  stopPolling();
+  $('#app').innerHTML = `
+  <div class="login-wrap"><div class="login-card">
+    <div class="brand"><span class="dot"></span> REDAÇÃO</div>
+    <h1>${mode === 'login' ? 'Acesse a redação' : 'Cadastre sua emissora'}</h1>
+    <p class="sub">Pautas, espelho e laudas do telejornal em um só lugar.</p>
+    <div class="tabs"><button data-mode="login" class="${mode === 'login' ? 'on' : ''}">Entrar</button><button data-mode="signup" class="${mode === 'signup' ? 'on' : ''}">Criar conta</button></div>
+    <form id="authf" autocomplete="on">
+      ${mode === 'signup' ? `
+        <div class="field"><label for="f-org">Emissora / Redação</label><input type="text" id="f-org" name="orgName" ${SUPA_MODE ? '' : 'required'} placeholder="Ex.: TV Cidade">
+          ${SUPA_MODE ? '<span class="hint">Recebeu convite da sua redação? Deixe em branco e use o e-mail convidado.</span>' : ''}</div>
+        <div class="field"><label for="f-name">Seu nome</label><input type="text" id="f-name" name="name" required autocomplete="name"></div>` : ''}
+      <div class="field"><label for="f-email">E-mail</label><input type="email" id="f-email" name="email" required autocomplete="username"></div>
+      <div class="field"><label for="f-pass">Senha</label><input type="password" id="f-pass" name="password" required minlength="${mode === 'signup' ? 8 : 1}" autocomplete="${mode === 'signup' ? 'new-password' : 'current-password'}"></div>
+      <div class="err" id="autherr"></div>
+      <button class="btn primary block" type="submit">${mode === 'login' ? 'Entrar' : 'Criar conta'}</button>
+    </form>
+    ${SUPA_MODE && mode === 'login' ? '<p style="margin:12px 0 0;text-align:center"><a href="#" id="forgot">Esqueci minha senha</a></p>' : ''}
+    ${mode === 'signup' ? '<p class="hint" style="margin-top:12px">Você será o administrador e poderá convidar a equipe (produtores, repórteres, editores, apresentadores).</p>' : ''}
+  </div></div>`;
+  $$('.tabs button').forEach(b => b.onclick = () => renderLogin(b.dataset.mode));
+  $('#authf').onsubmit = async (e) => {
+    e.preventDefault();
+    const body = Object.fromEntries(new FormData(e.target));
+    try {
+      const r = await api('POST', mode === 'login' ? '/api/auth/login' : '/api/auth/signup', body);
+      if (r && r.confirm) { $('#autherr').style.color = 'var(--green)'; $('#autherr').textContent = 'Conta criada! Confirme o e-mail que enviamos e depois entre.'; return; }
+      await boot();
+    }
+    catch (er) { $('#autherr').style.color = ''; $('#autherr').textContent = er.message; }
+  };
+  const fg = $('#forgot'); if (fg) fg.onclick = async (e) => {
+    e.preventDefault();
+    const email = $('#f-email').value.trim();
+    if (!email) { $('#autherr').textContent = 'Digite seu e-mail acima e clique novamente.'; return; }
+    try { await api('POST', '/api/auth/forgot', { email }); $('#autherr').style.color = 'var(--green)'; $('#autherr').textContent = 'Enviamos um link para redefinir a senha.'; }
+    catch (er) { $('#autherr').textContent = er.message; }
+  };
+}
+
+// =============================================================== shell
+async function boot() {
+  try {
+    const me = await api('GET', '/api/me');
+    S.me = me.user; S.org = me.org; S.perms = me.perms; S.roles = me.roles;
+  } catch { return renderLogin(); }
+  [S.users, S.programs] = await Promise.all([api('GET', '/api/users'), api('GET', '/api/programs')]);
+  if (!S.rd.programId && S.programs.length) S.rd.programId = S.programs[0].id;
+  renderShell();
+  go((location.hash || '#pautas').slice(1));
+}
+function renderShell() {
+  const nav = [['pautas', 'Pautas'], ['materias', 'Matérias'], ['calendario', 'Calendário'], ['espelho', 'Espelho'], ['busca', 'Busca'], ['programas', 'Telejornais'], ['equipe', 'Equipe'], ['log', 'Atividade']];
+  $('#app').innerHTML = `
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand"><span class="dot"></span> REDAÇÃO</div>
+      <nav class="nav">${nav.map(([k, l]) => `<button data-go="${k}">${l}</button>`).join('')}</nav>
+      <div class="spacer"></div>
+      <form id="gsearch-f" class="gsearch" role="search"><input type="search" id="gsearch" placeholder="Buscar pautas e matérias…" aria-label="Buscar pautas e matérias"></form>
+      <span class="org">${esc(S.org.name)}</span>
+      <span class="clock" id="clock">--:--:--</span>
+      <div class="userchip" id="userchip"><span class="avatar">${esc(initials(S.me.name))}</span><span>${esc(S.me.name.split(' ')[0])}</span></div>
+    </header>
+    <main class="main" id="main"></main>
+  </div>`;
+  $$('[data-go]').forEach(b => b.onclick = () => go(b.dataset.go));
+  $('#userchip').onclick = userMenu;
+  $('#gsearch-f').onsubmit = (e) => {
+    e.preventDefault(); const v = $('#gsearch').value.trim(); if (!v) return;
+    S.bq = { q: v, from: '', to: '', status: '', reporterId: '', comMateria: false }; $('#gsearch').value = '';
+    if (S.view === 'busca') viewBusca(); else go('busca');
+  };
+  const tick = () => { const c = $('#clock'); if (c) c.textContent = new Date().toLocaleTimeString('pt-BR'); };
+  tick(); clearInterval(S.clockTimer); S.clockTimer = setInterval(tick, 1000);
+}
+function userMenu() {
+  const old = $('.menu'); if (old) return old.remove();
+  const m = document.createElement('div'); m.className = 'menu';
+  m.innerHTML = `<div class="who"><b>${esc(S.me.name)}</b><div class="hint">${esc(S.me.email)} · ${esc(S.me.roleLabel)}</div></div>
+    <button data-a="pw">Alterar senha</button><button data-a="out">Sair</button>`;
+  document.body.appendChild(m);
+  const off = (e) => { if (!m.contains(e.target) && !e.target.closest('#userchip')) { m.remove(); document.removeEventListener('click', off); } };
+  setTimeout(() => document.addEventListener('click', off));
+  m.onclick = async (e) => {
+    const a = e.target.dataset.a; if (!a) return; m.remove();
+    if (a === 'out') { await releaseLocks(); await api('POST', '/api/auth/logout'); S.me = null; renderLogin(); }
+    if (a === 'pw') changePassword();
+  };
+}
+function changePassword() {
+  const md = modal('Alterar senha', `<form id="pwf">
+    <div class="field"><label>Senha atual</label><input type="password" name="current" required autocomplete="current-password"></div>
+    <div class="field"><label>Nova senha (mín. 8 caracteres)</label><input type="password" name="password" required minlength="8" autocomplete="new-password"></div>
+    <div class="err" id="pwerr"></div><button class="btn primary">Salvar</button></form>`);
+  $('#pwf', md.el).onsubmit = async (e) => {
+    e.preventDefault();
+    try { await api('PUT', '/api/me/password', Object.fromEntries(new FormData(e.target))); md.close(); toast('Senha alterada.'); }
+    catch (er) { $('#pwerr', md.el).textContent = er.message; }
+  };
+}
+
+async function go(view) {
+  if (!['pautas', 'materias', 'calendario', 'espelho', 'busca', 'programas', 'equipe', 'log'].includes(view)) view = 'pautas';
+  if (S.view !== view) {
+    if (S.pautaDirty && !(await autosavePauta()) && !confirm('A pauta ainda não pôde ser salva no sistema (veja o aviso ao lado de Salvar). Ela fica guardada como rascunho neste navegador. Sair mesmo assim?')) return;
+    clearTimeout(S.pAutoTimer);
+    if (S.matDirty && !(await saveMateria()) && !confirm('Não foi possível salvar a matéria. Sair mesmo assim?')) return;
+    S.matDirty = false; clearTimeout(S.matTimer);
+    await flushItem();
+    await releaseLocks();
+    S.pautaDirty = false;
+  }
+  S.view = view; history.replaceState(null, '', '#' + view);
+  $$('[data-go]').forEach(b => b.classList.toggle('on', b.dataset.go === view));
+  stopPolling();
+  ({ pautas: viewPautas, materias: viewMaterias, calendario: viewCalendario, espelho: viewEspelho, busca: viewBusca, programas: viewProgramas, equipe: viewEquipe, log: viewLog })[view]();
+}
+window.addEventListener('hashchange', () => { const v = location.hash.slice(1); if (S.me && v && v !== S.view) go(v); });
+function stopPolling() { clearInterval(S.pollTimer); S.pollTimer = null; }
+
+// travas
+const heldLocks = new Set();
+async function acquireLock(key) {
+  try {
+    const r = await api('POST', '/api/locks/' + key);
+    if (r.ok) { heldLocks.add(key); return { ok: true }; }
+    return r;
+  } catch { return { ok: true }; }
+}
+async function releaseLocks() {
+  const keys = [...heldLocks]; heldLocks.clear();
+  await Promise.all(keys.map(k => api('DELETE', '/api/locks/' + k).catch(() => {})));
+}
+// renova travas ativas
+setInterval(() => { heldLocks.forEach(k => api('POST', '/api/locks/' + k).catch(() => {})); }, 30000);
+window.addEventListener('beforeunload', (e) => {
+  if (S.pautaDirty) saveDraft();   // garante o rascunho mesmo se a pessoa fechar a aba
+  if (S.pautaDirty || S.itemDirty || S.matDirty) { e.preventDefault(); e.returnValue = ''; }
+});
+
+// =============================================================== PAUTAS
+async function loadPautas() {
+  const f = S.pf; const q = new URLSearchParams();
+  if (!f.allDates) { q.set('from', f.date); q.set('to', f.date); }
+  ['status', 'editoria', 'programaId', 'q'].forEach(k => f[k] && q.set(k, f[k]));
+  if (f.mine) q.set('mine', '1');
+  S.pautas = await api('GET', '/api/pautas?' + q);
+}
+async function viewPautas() {
+  $('#main').innerHTML = `
+  <div class="workspace ws-pautas">
+    <aside class="pane"><div class="pane-h"><h2>Filtros</h2></div>
+      <div class="pane-b pad filters">
+        <div id="minical" class="minical"></div>
+        <div class="field"><label>Data</label>
+          <div class="datenav"><button class="btn sm" data-d="-1" aria-label="Dia anterior">‹</button><input type="date" id="pf-date" value="${S.pf.date}"><button class="btn sm" data-d="1" aria-label="Próximo dia">›</button></div>
+          <label class="check" style="margin-top:6px"><input type="checkbox" id="pf-all" ${S.pf.allDates ? 'checked' : ''}> Todas as datas</label>
+          <button class="btn sm" id="pf-today" style="margin-top:6px">Hoje</button>
+        </div>
+        <div class="field"><label>Buscar</label><input type="search" id="pf-q" value="${esc(S.pf.q)}" placeholder="Retranca, matéria, entrevistado…"></div>
+        <div class="field"><label>Status</label><select id="pf-status"><option value="">Todos</option>${opts(PAUTA_STATUS, S.pf.status)}</select></div>
+        <div class="field"><label>Editoria</label><select id="pf-editoria"><option value="">Todas</option>${opts(EDITORIAS, S.pf.editoria)}</select></div>
+        <div class="field"><label>Telejornal</label><select id="pf-prog"><option value="">Todos</option>${opts(S.programs.map(p => [p.id, p.name]), S.pf.programaId)}</select></div>
+        <label class="check"><input type="checkbox" id="pf-mine" ${S.pf.mine ? 'checked' : ''}> Somente minhas pautas</label>
+        <hr style="border-color:var(--line);margin:14px 0">
+        <div class="hint" id="pf-count"></div>
+      </div>
+    </aside>
+    <section class="pane"><div class="pane-h"><h2>Pautas</h2><span class="hint" id="pf-label"></span><div style="flex:1"></div>
+        <button class="btn sm" id="pf-print">Imprimir lista</button><button class="btn primary sm" id="pf-new">+ Nova pauta</button></div>
+      <div class="pane-b" id="pauta-list"></div></section>
+    <section class="pane editor" id="pauta-editor"></section>
+  </div>`;
+  const reload = async () => { S.calYm = S.pf.date.slice(0, 7); await loadPautas(); renderPautaList(); renderMiniCal(); };
+  const set = (k, v) => { S.pf[k] = v; reload(); };
+  $('#pf-date').onchange = e => { S.pf.allDates = false; $('#pf-all').checked = false; set('date', e.target.value || today()); };
+  $$('[data-d]').forEach(b => b.onclick = () => { S.pf.allDates = false; $('#pf-all').checked = false; S.pf.date = addDays(S.pf.date, +b.dataset.d); $('#pf-date').value = S.pf.date; reload(); });
+  $('#pf-today').onclick = () => { S.pf.allDates = false; $('#pf-all').checked = false; S.pf.date = today(); $('#pf-date').value = S.pf.date; reload(); };
+  $('#pf-all').onchange = e => set('allDates', e.target.checked);
+  let qt; $('#pf-q').oninput = e => { clearTimeout(qt); qt = setTimeout(() => set('q', e.target.value.trim()), 300); };
+  $('#pf-status').onchange = e => set('status', e.target.value);
+  $('#pf-editoria').onchange = e => set('editoria', e.target.value);
+  $('#pf-prog').onchange = e => set('programaId', e.target.value);
+  $('#pf-mine').onchange = e => set('mine', e.target.checked);
+  $('#pf-new').onclick = () => openPauta(null);
+  $('#pf-print').onclick = printPautaList;
+  $('#pauta-list').onclick = e => { const tr = e.target.closest('tr[data-id]'); if (tr) openPauta(tr.dataset.id); };
+  await reload();
+  renderPautaEditor();
+  offerDraftRestore();
+  S.pollTimer = setInterval(async () => { if (S.view !== 'pautas') return; try { await loadPautas(); renderPautaList(); } catch { } }, 8000);
+}
+function renderPautaList() {
+  const el = $('#pauta-list'); if (!el) return;
+  $('#pf-label').textContent = S.pf.allDates ? 'todas as datas' : `${weekday(S.pf.date)}, ${fmtDate(S.pf.date)}`;
+  $('#pf-count').textContent = `${S.pautas.length} pauta(s) encontrada(s)`;
+  if (!S.pautas.length) { el.innerHTML = `<div class="empty">Nenhuma pauta para este filtro.<br><br><button class="btn primary" onclick="openPauta(null)">Criar pauta</button></div>`; return; }
+  const selId = S.pauta && S.pauta.id;
+  el.innerHTML = `<table class="grid"><thead><tr><th></th><th>Retranca</th><th title="Retranca · Proposta · Marcação · Informações">R P M I</th><th>Status</th><th>Editoria</th><th>Repórter</th><th>Hora</th>${S.pf.allDates ? '<th>Data</th>' : ''}<th>Formato</th><th>Matéria</th></tr></thead><tbody>
+  ${S.pautas.map(p => `<tr class="row ${p.id === selId ? 'sel' : ''}" data-id="${p.id}">
+    <td>${p.prioridade === 'urgente' ? '<span class="pri-urgente">!!</span>' : p.prioridade === 'alta' ? '<span class="pri-alta">!</span>' : ''}${p.lock && !p.lock.mine ? ` <span class="lockico" title="Em edição por ${esc(p.lock.name)}">🔒</span>` : ''}</td>
+    <td class="retr">${esc(p.retranca)}</td>
+    <td class="dots">${pautaChecks(p).map(([l, ok]) => `<i class="${ok ? 'ok' : ''}" title="${l}: ${ok ? 'preenchido' : 'pendente'}"></i>`).join('')}</td>
+    <td><span class="pill st-${p.status}">${esc(label(PAUTA_STATUS, p.status))}</span></td>
+    <td>${esc(p.editoria)}</td><td>${esc(repName(p))}</td><td class="mono">${esc(p.horario)}</td>
+    ${S.pf.allDates ? `<td class="mono">${fmtDate(p.data)}</td>` : ''}<td><span class="tipo">${esc(p.formato || '')}</span></td>
+    <td>${materiaPill(p)}</td></tr>`).join('')}
+  </tbody></table>`;
+}
+async function openPauta(id) {
+  if (S.pautaDirty && !(await autosavePauta()) && !confirm('A pauta atual ainda não pôde ser salva no sistema. Ela fica guardada como rascunho neste navegador. Continuar?')) return;
+  clearTimeout(S.pAutoTimer); S.pConflict = null;
+  await releaseLocks();
+  S.pautaDirty = false;
+  if (!id) {
+    S.pauta = { retranca: '', data: S.pf.allDates ? today() : S.pf.date, editoria: '', status: 'sugestao', prioridade: 'normal', formato: 'VT', programaId: S.pf.programaId || '',
+      produtorId: S.me.role === 'produtor' || S.me.role === 'chefe' ? S.me.id : '', reporterId: S.me.role === 'reporter' ? S.me.id : '',
+      entrevistados: [], roteiro: [] };
+  } else {
+    try { S.pauta = await api('GET', '/api/pautas/' + id); } catch (e) { return toast(e.message, true); }
+    const d = readDraft(id);   // rascunho mais novo que a versão salva (página fechada antes de gravar)
+    if (d && d.at > Date.parse(S.pauta.updatedAt || 0)) {
+      if (confirm(`Há alterações desta pauta que não chegaram a ser salvas (${new Date(d.at).toLocaleString('pt-BR')}).\n\nOK = recuperar essas alterações · Cancelar = descartar`)) {
+        Object.assign(S.pauta, d.p, { updatedAt: S.pauta.updatedAt, lock: S.pauta.lock, usos: S.pauta.usos }); renderPautaList(); renderPautaEditor(); markPautaDirty(); return;
+      }
+      clearDraft(S.pauta);
+    }
+  }
+  renderPautaList(); renderPautaEditor();
+  if (!id) setTimeout(() => { const r = $('#pauta-editor [data-pf=retranca]'); if (r) r.focus(); }, 0);
+}
+window.openPauta = openPauta;
+
+function renderPautaEditor() {
+  const el = $('#pauta-editor'); if (!el) return;
+  const p = S.pauta;
+  if (!p) { el.innerHTML = `<div class="pane-h"><h2>Pauta</h2></div><div class="empty">Selecione uma pauta na lista ou crie uma nova.<br><br><span class="hint">Atalho: Ctrl+S salva a pauta aberta.</span></div>`; return; }
+  const lockedBy = p.lock && !p.lock.mine ? p.lock.name : null;
+  const ro = lockedBy ? 'disabled' : '';
+  const users = S.users.filter(u => u.active);
+  const uopts = (sel, roles) => `<option value="">—</option>` + users.filter(u => !roles || roles.includes(u.role) || u.id === sel).map(u => `<option value="${u.id}" ${u.id === sel ? 'selected' : ''}>${esc(u.name)}</option>`).join('');
+  const F = (k) => esc(p[k] || '');
+  el.innerHTML = `
+  <div id="p-head" style="display:contents">${pautaHeadHtml(p, ro)}</div>
+  ${lockedBy ? `<div class="banner">🔒 Pauta em edição por <b>${esc(lockedBy)}</b>. Você está vendo em modo leitura.</div>` : ''}
+  <div class="pane-b"><div class="form" id="pform">
+    <div class="checklist" id="pcheck">${checklistHtml(p)}</div>
+    <div class="sec"><h3><span class="stepn">1</span> Retranca <span class="req">obrigatório</span><span class="grow"></span><span class="hint" style="text-transform:none;letter-spacing:0">nome da matéria</span></h3><div class="sb">
+      <div class="field"><label>Retranca *</label><input type="text" class="retranca-input" data-pf="retranca" value="${F('retranca')}" maxlength="80" placeholder="EX.: OBRAS AVENIDA" ${ro}></div>
+      <div class="row4">
+        <div class="field"><label>Data</label><input type="date" data-pf="data" value="${F('data')}" ${ro}></div>
+        <div class="field"><label>Editoria</label><input type="text" list="dl-edit" data-pf="editoria" value="${F('editoria')}" ${ro}></div>
+        <div class="field"><label>Status</label><select data-pf="status" ${ro}>${opts(PAUTA_STATUS, p.status)}</select></div>
+        <div class="field"><label>Prioridade</label><select data-pf="prioridade" ${ro}>${opts(PRIORIDADES, p.prioridade)}</select></div>
+      </div>
+      <div class="row3">
+        <div class="field"><label>Telejornal (destino)</label><select data-pf="programaId" ${ro}><option value="">—</option>${opts(S.programs.map(x => [x.id, x.name]), p.programaId)}</select></div>
+        <div class="field"><label>Formato</label><select data-pf="formato" ${ro}>${opts(FORMATOS, p.formato)}</select></div>
+        <div class="field"><label>Palavras-chave</label><input type="text" data-pf="tags" value="${F('tags')}" placeholder="separadas por vírgula" ${ro}></div>
+      </div>
+      <div class="teambox">
+        <div class="teambox-h"><span class="lbl">Equipe</span><span class="hint">escolha da lista ou digite o nome</span></div>
+        <div class="row3">
+          <div class="field"><label>Repórter</label><input type="text" list="dl-rep" data-team="reporter" value="${esc(repName(p))}" placeholder="Nome do repórter" autocomplete="off" ${ro}></div>
+          <div class="field"><label>Repórter cinematográfico</label><input type="text" list="dl-cine" data-pf="cinegrafista" value="${F('cinegrafista')}" placeholder="Nome do cinegrafista" autocomplete="off" ${ro}></div>
+          <div class="field"><label>Motorista</label><input type="text" list="dl-mot" data-pf="motorista" value="${F('motorista')}" placeholder="Nome do motorista" autocomplete="off" ${ro}></div>
+        </div>
+      </div>
+      ${teamLists()}
+      <datalist id="dl-edit">${EDITORIAS.map(e => `<option>${esc(e)}</option>`).join('')}</datalist>
+    </div></div>
+
+    <div class="sec"><h3><span class="stepn">2</span> Proposta <span class="req">obrigatório</span><span class="grow"></span><span class="hint" style="text-transform:none;letter-spacing:0">o que se espera da matéria</span></h3><div class="sb">
+      <textarea data-pf="proposta" rows="4" placeholder="Qual é a notícia? O que se espera dessa matéria: o enfoque, o que precisa ser mostrado e por que interessa ao público hoje." ${ro}>${F('proposta')}</textarea></div></div>
+
+    <div class="sec"><h3><span class="stepn">3</span> Marcação <span class="grow"></span><span class="hint" style="text-transform:none;letter-spacing:0">${(p.entrevistados || []).filter(x => x.confirmado).length}/${(p.entrevistados || []).length} entrevistado(s) confirmado(s)</span></h3><div class="sb">
+      <div class="lbl" style="margin-bottom:4px">Entrevistados / personagens</div>
+      ${(p.entrevistados || []).map((r, i) => `<div class="entcard">
+        <div class="row3">
+          <div class="field"><label>Nome</label><input type="text" data-ent="${i}" data-k="nome" value="${esc(r.nome)}" ${ro}></div>
+          <div class="field"><label>Função / cargo</label><input type="text" data-ent="${i}" data-k="funcao" value="${esc(r.funcao)}" ${ro}></div>
+          <div class="field"><label>Telefone / contato</label><input type="text" data-ent="${i}" data-k="telefone" value="${esc(r.telefone)}" ${ro}></div>
+        </div>
+        <div class="row4">
+          <div class="field"><label>Data</label><input type="date" data-ent="${i}" data-k="data" value="${esc(r.data || p.data || '')}" ${ro}></div>
+          <div class="field"><label>Horário</label><input type="time" data-ent="${i}" data-k="horario" value="${esc(r.horario)}" ${ro}></div>
+          <div class="field" style="grid-column:span 2"><label>Local / endereço da gravação</label><input type="text" data-ent="${i}" data-k="local" value="${esc(r.local)}" ${ro}></div>
+        </div>
+        <div class="formbar"><label class="check"><input type="checkbox" data-ent="${i}" data-k="confirmado" ${r.confirmado ? 'checked' : ''} ${ro}> Marcação confirmada</label>
+          <input type="text" data-ent="${i}" data-k="obs" value="${esc(r.obs || '')}" placeholder="Obs.: assessoria, autorização de imagem, ponto de encontro…" style="flex:1" ${ro}>
+          <button class="btn sm danger" data-entdel="${i}" ${ro}>Remover</button></div>
+      </div>`).join('') || '<div class="hint" style="margin-bottom:6px">Nenhum entrevistado marcado ainda.</div>'}
+      <button class="btn sm" id="ent-add" ${ro}>+ Entrevistado</button>
+      <div class="lbl" style="margin:14px 0 4px">Local principal da gravação</div>
+      <div class="row3">
+        <div class="field"><label>Horário de saída / início</label><input type="time" data-pf="horario" value="${F('horario')}" ${ro}></div>
+        <div class="field"><label>Local</label><input type="text" data-pf="local" value="${F('local')}" ${ro}></div>
+        <div class="field"><label>Endereço</label><input type="text" data-pf="endereco" value="${F('endereco')}" ${ro}></div>
+      </div>
+      <div class="lbl" style="margin:4px 0">Roteiro de gravação (outros pontos)</div>
+      <table class="subtable"><thead><tr><th style="width:90px">Hora</th><th>Local</th><th>O que gravar</th><th style="width:30px"></th></tr></thead>
+        <tbody>${(p.roteiro || []).map((r, i) => `<tr>
+          <td><input type="time" data-rot="${i}" data-k="hora" value="${esc(r.hora)}" ${ro}></td>
+          <td><input type="text" data-rot="${i}" data-k="local" value="${esc(r.local)}" ${ro}></td>
+          <td><input type="text" data-rot="${i}" data-k="acao" value="${esc(r.acao)}" ${ro}></td>
+          <td><button class="btn sm" data-rotdel="${i}" ${ro} aria-label="Remover">×</button></td></tr>`).join('')}</tbody></table>
+      <button class="btn sm" id="rot-add" style="margin-top:6px" ${ro}>+ Ponto de gravação</button>
+    </div></div>
+
+    <div class="sec"><h3><span class="stepn">4</span> Informações <span class="grow"></span><span class="hint" style="text-transform:none;letter-spacing:0">o que o jornalista precisa saber</span></h3><div class="sb">
+      <textarea data-pf="historico" rows="7" placeholder="Dados apurados, números, datas, contexto, histórico do caso, outro lado, fontes consultadas, links e documentos." ${ro}>${F('historico')}</textarea></div></div>
+
+    <div class="sec sec-materia" id="materia"><h3><span class="stepn">5</span> Matéria <span class="grow"></span><span class="readtime" id="mat-rt">${materiaStats(p.materia)}</span></h3><div class="sb">
+      <div class="formbar" style="margin-bottom:8px">
+        <span class="lbl">Inserir:</span>
+        ${['OFF', 'SONORA', 'PASSAGEM', 'ARTE', 'GC', 'TRILHA', 'IMAGEM'].map(t => `<button class="btn sm" data-ins="${t}" ${ro}>[${t}]</button>`).join('')}
+        <div style="flex:1"></div>
+        <label class="lbl" for="mat-st">Situação</label>
+        <select id="mat-st" data-pf="materiaStatus" style="width:auto" ${ro}>${opts(MATERIA_STATUS, p.materiaStatus || '')}</select>
+      </div>
+      <textarea class="materia" data-pf="materia" rows="16" placeholder="Texto da matéria escrito pelo repórter.&#10;&#10;[OFF]&#10;Texto narrado sobre as imagens…&#10;&#10;[SONORA] NOME / CARGO&#10;&quot;Fala do entrevistado…&quot;&#10;&#10;[PASSAGEM] NOME DO REPÓRTER&#10;Texto da passagem…" ${ro}>${F('materia')}</textarea>
+      <div class="meta" style="margin-top:6px">${p.materiaAutorId ? `Última edição do texto: <b>${esc(userName(p.materiaAutorId))}</b> em ${fmtDT(p.materiaAt)}` : 'A matéria fica salva na pauta. Qualquer pessoa da redação pode encontrá-la em <b>Busca</b>.'}</div>
+    </div></div>
+
+    <div class="sec"><h3>Encaminhamento</h3><div class="sb"><textarea data-pf="encaminhamento" rows="3" placeholder="Orientação para a equipe: abordagem, sonoras necessárias, passagem, imagens obrigatórias, cuidados." ${ro}>${F('encaminhamento')}</textarea></div></div>
+
+    <div class="sec"><h3>Produção e edição</h3><div class="sb"><div class="row2">
+      <div class="field"><label>Produtor(a)</label><select data-pf="produtorId" ${ro}>${uopts(p.produtorId, ['produtor', 'chefe', 'admin', 'editor'])}</select></div>
+      <div class="field"><label>Editor(a) de texto</label><input type="text" data-pf="editorTexto" value="${F('editorTexto')}" ${ro}></div>
+    </div></div></div>
+
+    <div class="sec"><h3>Sugestão de perguntas</h3><div class="sb"><textarea data-pf="perguntas" rows="3" ${ro}>${F('perguntas')}</textarea></div></div>
+    <div class="sec"><h3>Imagens e Arte</h3><div class="sb"><div class="row2">
+      <div class="field"><label>Imagens necessárias / arquivo</label><textarea data-pf="imagens" rows="3" ${ro}>${F('imagens')}</textarea></div>
+      <div class="field"><label>Pedido de arte</label><textarea data-pf="arte" rows="3" ${ro}>${F('arte')}</textarea></div>
+    </div></div></div>
+    <div class="sec"><h3>Observações</h3><div class="sb"><textarea data-pf="observacoes" rows="2" placeholder="Riscos, autorizações, segurança da equipe, direito de resposta…" ${ro}>${F('observacoes')}</textarea></div></div>
+    ${p.id ? `<div class="meta">Criada por ${esc(userName(p.createdBy))} em ${fmtDT(p.createdAt)} · Última alteração: ${esc(userName(p.updatedBy))} em ${fmtDT(p.updatedAt)}
+      ${p.usos && p.usos.length ? `<br>No espelho: ${p.usos.map(u => `${esc(u.programa)} (${fmtDate(u.data)})`).join(', ')}` : ''}</div>` : ''}
+  </div></div>`;
+
+  const form = $('#pform');
+  const markDirty = markPautaDirty;
+  form.addEventListener('input', (e) => {
+    const t = e.target;
+    if (t.dataset.pf) p[t.dataset.pf] = t.dataset.pf === 'retranca' ? t.value.toUpperCase() : t.value;
+    if (t.dataset.team === 'reporter') {   // nome da lista vira usuário do sistema; senão fica o nome digitado
+      const v = t.value.trim(); const u = S.users.find(x => x.name.toLowerCase() === v.toLowerCase());
+      if (u) { p.reporterId = u.id; p.reporterNome = ''; } else { p.reporterId = ''; p.reporterNome = v; }
+    }
+    if (t.dataset.pf === 'materia') {
+      const rt = $('#mat-rt'); if (rt) rt.textContent = materiaStats(p.materia);
+      if (p.materia.trim() && !p.materiaStatus) { p.materiaStatus = 'rascunho'; const ms = $('#mat-st'); if (ms) ms.value = 'rascunho'; }
+    }
+    if (t.dataset.ent != null) p.entrevistados[+t.dataset.ent][t.dataset.k] = t.type === 'checkbox' ? t.checked : t.value;
+    if (t.dataset.rot != null) p.roteiro[+t.dataset.rot][t.dataset.k] = t.value;
+    markDirty();
+  });
+  form.addEventListener('change', (e) => { if (e.target.type === 'checkbox' || e.target.tagName === 'SELECT') form.dispatchEvent(new Event('input')); });
+  form.addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    e.preventDefault();
+    if (b.dataset.ins) {   // insere marcação de roteiro no cursor
+      const ta = $('[data-pf=materia]', form); const tag = `[${b.dataset.ins}] `;
+      const s = ta.selectionStart, before = ta.value.slice(0, s);
+      const ins = (before && !before.endsWith('\n') ? '\n\n' : '') + tag + (b.dataset.ins === 'SONORA' || b.dataset.ins === 'PASSAGEM' || b.dataset.ins === 'GC' ? 'NOME / CARGO\n' : '');
+      ta.setRangeText(ins, s, ta.selectionEnd, 'end'); ta.focus();
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      return;
+    }
+    if (b.id === 'ent-add') p.entrevistados = [...(p.entrevistados || []), { nome: '', funcao: '', telefone: '', data: p.data || '', horario: '', local: '', obs: '', confirmado: false }];
+    else if (b.id === 'rot-add') p.roteiro = [...(p.roteiro || []), { hora: '', local: '', acao: '' }];
+    else if (b.dataset.entdel != null) p.entrevistados.splice(+b.dataset.entdel, 1);
+    else if (b.dataset.rotdel != null) p.roteiro.splice(+b.dataset.rotdel, 1);
+    else return;
+    const sc = $('#pauta-editor .pane-b').scrollTop; renderPautaEditor(); markDirty(); $('#pauta-editor .pane-b').scrollTop = sc;
+  });
+  bindPautaHead(p);
+}
+function pautaHeadHtml(p, ro) {
+  return `<div class="pane-h"><h2>${p.id ? 'Pauta' : 'Nova pauta'}</h2>
+    <span class="savestate ${S.pautaDirty ? 'dirty' : ''}" id="pstate">${S.pautaDirty ? 'Alterações não salvas' : p.id ? 'Salva' : 'Não salva'}</span>
+    <div class="formbar">
+      <button class="btn primary sm" id="p-save" ${ro}>Salvar</button>
+      <button class="btn sm" id="p-mat" title="Abrir o espaço de redação da matéria">✎ Matéria</button>
+      ${p.id ? `<button class="btn sm" id="p-send">Enviar ao espelho</button><button class="btn sm" id="p-dup">Duplicar</button><button class="btn sm" id="p-print">Imprimir / PDF</button>
+      ${S.perms.deletePauta ? `<button class="btn sm danger" id="p-del" ${ro}>Excluir</button>` : ''}` : ''}
+    </div></div>`;
+}
+function bindPautaHead(p) {
+  $('#p-save').onclick = savePauta;
+  $('#p-mat').onclick = async () => {
+    if (p.id && S.pautaDirty) await autosavePauta();
+    if (p.id && !S.pautaDirty) { S.matOpenId = p.id; S.mf = Object.assign(S.mf || {}, { date: p.data, allDates: false }); return go('materias'); }
+    const m = $('#materia'); m.scrollIntoView({ behavior: 'smooth', block: 'start' }); setTimeout(() => $('[data-pf=materia]').focus({ preventScroll: true }), 350); };
+  if (p.id) {
+    $('#p-send').onclick = async () => { if (S.pautaDirty) await autosavePauta(); sendToRundown(p); };
+    $('#p-dup').onclick = async () => { if (S.pautaDirty && !(await autosavePauta()) && !confirm('Descartar alterações?')) return; S.pautaDirty = false; releaseLocks();
+      const copy = JSON.parse(JSON.stringify(p)); ['id', 'createdAt', 'updatedAt', 'createdBy', 'updatedBy', 'usos', 'lock'].forEach(k => delete copy[k]);
+      copy.retranca = (copy.retranca + ' 2').slice(0, 80); copy.status = 'sugestao'; S.pauta = copy; renderPautaList(); renderPautaEditor(); markPautaDirty(); };
+    $('#p-print').onclick = () => printPauta(p);
+    const del = $('#p-del'); if (del) del.onclick = async () => {
+      if (!confirm(`Excluir a pauta ${p.retranca}?`)) return;
+      try { await api('DELETE', '/api/pautas/' + p.id); clearTimeout(S.pAutoTimer); clearDraft(p); toast('Pauta excluída.'); S.pauta = null; S.pautaDirty = false; await releaseLocks(); await loadPautas(); renderPautaList(); renderPautaEditor(); }
+      catch (e) { toast(e.message, true); }
+    };
+  }
+}
+
+// =============================================================== SALVAMENTO AUTOMÁTICO DA PAUTA
+// 1) rascunho no navegador a cada alteração (sobrevive a fechar a aba ou cair a internet)
+// 2) gravação no sistema 3 s depois que a pessoa para de digitar (a partir da retranca preenchida)
+const draftKey = (id) => `redacao:rascunho:${S.me ? S.me.id : ''}:${id || 'nova'}`;
+function saveDraft() {
+  const p = S.pauta; if (!p) return;
+  try { localStorage.setItem(draftKey(p.id), JSON.stringify({ at: Date.now(), p })); } catch { /* armazenamento indisponível */ }
+}
+function readDraft(id) { try { const d = JSON.parse(localStorage.getItem(draftKey(id)) || 'null'); return d && d.p ? d : null; } catch { return null; } }
+function clearDraft(p) { try { localStorage.removeItem(draftKey(p && p.id)); if (p && p.id) localStorage.removeItem(draftKey(null)); } catch { } }
+function setPState(txt, dirty) { const st = $('#pstate'); if (st) { st.textContent = txt; st.classList.toggle('dirty', !!dirty); } }
+async function markPautaDirty() {
+  const p = S.pauta; if (!p) return;
+  S.pEditSeq = (S.pEditSeq || 0) + 1;
+  if (!S.pautaDirty) {
+    S.pautaDirty = true;
+    if (p.id) { const r = await acquireLock('p:' + p.id); if (!r.ok) toast(`Pauta em edição por ${r.lock.name}.`, true); }
+  }
+  setPState('Alterações não salvas', true);
+  const ck = $('#pcheck'); if (ck) ck.innerHTML = checklistHtml(p);
+  saveDraft();
+  clearTimeout(S.pAutoTimer); S.pAutoTimer = setTimeout(() => autosavePauta(), 3000);
+}
+// devolve true quando não ficou nada pendente
+async function autosavePauta() {
+  const p = S.pauta; clearTimeout(S.pAutoTimer);
+  if (!p || !S.pautaDirty) return true;
+  if (S.pSaving) return S.pSaving;
+  if (S.pConflict === p) { setPState('Não salva: alterada por outra pessoa · clique em Salvar', true); return false; }
+  if (!String(p.retranca || '').trim()) { setPState('Rascunho guardado neste navegador · preencha a retranca para salvar', true); return false; }
+  if (['pronta', 'gravada', 'exibida'].includes(p.status) && pautaChecks(p).some(x => !x[1])) { setPState('Rascunho guardado · complete os 4 itens para este status', true); return false; }
+  const seq = S.pEditSeq, wasNew = !p.id;
+  setPState('Salvando…', true);
+  S.pSaving = (async () => {
+    try {
+      const saved = wasNew ? await api('POST', '/api/pautas', p) : await api('PUT', '/api/pautas/' + p.id, p);
+      ['id', 'updatedAt', 'updatedBy', 'createdAt', 'createdBy', 'materiaAutorId', 'materiaAt'].forEach(k => { if (saved[k] !== undefined) p[k] = saved[k]; });
+      if (wasNew) {
+        try { localStorage.removeItem(draftKey(null)); } catch { }
+        await acquireLock('p:' + p.id);
+        if (S.pauta === p) { const h = $('#p-head'); if (h) { h.innerHTML = pautaHeadHtml(p, ''); bindPautaHead(p); } }
+      }
+      if (S.pEditSeq === seq) { S.pautaDirty = false; clearDraft(p); setPState(`Salva automaticamente às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`); }
+      else { saveDraft(); clearTimeout(S.pAutoTimer); S.pAutoTimer = setTimeout(() => autosavePauta(), 3000); }
+      if (S.view === 'pautas') { await loadPautas(); renderPautaList(); }
+      return !S.pautaDirty;
+    } catch (e) {
+      if (e.status === 409) { S.pConflict = p; toast('Outra pessoa alterou esta pauta. Seu texto está guardado como rascunho; clique em Salvar para decidir.', true); }
+      else if (e.status !== 423) toast('Salvamento automático: ' + e.message, true);
+      setPState('Rascunho guardado neste navegador', true);
+      return false;
+    } finally { S.pSaving = null; }
+  })();
+  return S.pSaving;
+}
+// rascunhos que ficaram para trás (página fechada antes de salvar)
+function offerDraftRestore() {
+  const d = readDraft(null); const el = $('#pauta-editor');
+  if (!d || !el || (S.pauta && S.pautaDirty)) return;
+  const when = new Date(d.at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const bar = document.createElement('div'); bar.className = 'banner draftbar';
+  bar.innerHTML = `📝 Há uma <b>nova pauta não salva</b>${d.p.retranca ? ` (<b>${esc(d.p.retranca)}</b>)` : ''}, de ${when}. <button class="btn sm primary" data-dr="ok">Recuperar</button> <button class="btn sm" data-dr="no">Descartar</button>`;
+  el.prepend(bar);
+  bar.onclick = async (e) => {
+    const a = e.target.dataset.dr; if (!a) return;
+    if (a === 'no') { if (!confirm('Descartar este rascunho? Ele não poderá ser recuperado.')) return; try { localStorage.removeItem(draftKey(null)); } catch { } bar.remove(); return; }
+    await releaseLocks();
+    S.pauta = Object.assign({ entrevistados: [], roteiro: [] }, d.p); delete S.pauta.id; S.pautaDirty = false; S.pConflict = null;
+    renderPautaList(); renderPautaEditor(); markPautaDirty(); toast('Rascunho recuperado.');
+  };
+}
+// listas de nomes sugeridos: cadastro da emissora + nomes já usados em pautas
+function teamLists() {
+  const uniq = (arr) => [...new Set(arr.map(s => String(s || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  const used = (k) => (S.pautas || []).map(x => x[k]);
+  const reps = uniq([...S.users.filter(u => u.active && ['reporter', 'apresentador'].includes(u.role)).map(u => u.name), ...used('reporterNome')]);
+  const cine = uniq([...(S.org.cinegrafistas || []), ...used('cinegrafista')]);
+  const mot = uniq([...(S.org.motoristas || []), ...used('motorista')]);
+  const dl = (id, list) => `<datalist id="${id}">${list.map(n => `<option value="${esc(n)}"></option>`).join('')}</datalist>`;
+  return dl('dl-rep', reps) + dl('dl-cine', cine) + dl('dl-mot', mot);
+}
+// Os quatro pilares da pauta: Retranca, Proposta, Marcação, Informações
+function pautaChecks(p) {
+  const filled = (v) => String(v || '').trim().length > 0;
+  return [
+    ['Retranca', filled(p.retranca)],
+    ['Proposta', filled(p.proposta)],
+    ['Marcação', (p.entrevistados || []).some(e => filled(e.nome) && (filled(e.local) || filled(p.local)))],
+    ['Informações', filled(p.historico)],
+  ];
+}
+function checklistHtml(p) {
+  const c = pautaChecks(p);
+  return c.map(([l, ok]) => `<span class="ck ${ok ? 'ok' : ''}">${ok ? '✓' : '○'} ${l}</span>`).join('') +
+    `<span class="hint">${c.filter(x => x[1]).length}/4 completos</span>`;
+}
+async function savePauta() {
+  const p = S.pauta; if (!p) return;
+  if (!String(p.retranca || '').trim()) return toast('Preencha a RETRANCA (nome da matéria).', true);
+  if (!String(p.proposta || '').trim()) return toast('Preencha a PROPOSTA: o que se espera dessa matéria.', true);
+  const missing = pautaChecks(p).filter(x => !x[1]).map(x => x[0]);
+  if (['pronta', 'gravada', 'exibida'].includes(p.status) && missing.length)
+    return toast(`Para marcar como "${label(PAUTA_STATUS, p.status)}" complete: ${missing.join(', ')}.`, true);
+  clearTimeout(S.pAutoTimer);
+  if (S.pSaving) await S.pSaving;   // evita criar a pauta duas vezes
+  try {
+    const saved = p.id ? await api('PUT', '/api/pautas/' + p.id, p) : await api('POST', '/api/pautas', p);
+    S.pautaDirty = false; S.pConflict = null; clearDraft(Object.assign({}, p, { id: saved.id })); await releaseLocks();
+    S.pauta = await api('GET', '/api/pautas/' + saved.id);
+    toast('Pauta salva.');
+    await loadPautas(); renderPautaList(); renderPautaEditor();
+  } catch (e) {
+    if (e.status === 409 && confirm(e.message + '\n\nSobrescrever mesmo assim?')) { p.force = true; await savePauta(); delete p.force; }
+    else toast(e.message, true);
+  }
+}
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+    if (S.view === 'pautas' && S.pauta) { e.preventDefault(); savePauta(); }
+    if (S.view === 'espelho' && S.selItem) { e.preventDefault(); flushItem(true); }
+    if (S.view === 'materias' && S.mat) { e.preventDefault(); saveMateria(true); }
+  }
+});
+function sendToRundown(p) {
+  const md = modal('Enviar pauta ao espelho', `
+    <p class="hint">A retranca <b>${esc(p.retranca)}</b> será incluída no espelho escolhido, vinculada a esta pauta.</p>
+    <div class="row2"><div class="field"><label>Telejornal</label><select id="sr-prog">${opts(S.programs.map(x => [x.id, x.name]), p.programaId || S.rd.programId)}</select></div>
+    <div class="field"><label>Data</label><input type="date" id="sr-date" value="${p.data || today()}"></div></div>
+    <div class="field"><label>Tipo</label><select id="sr-tipo">${opts(TIPOS, p.formato && TIPOS.includes(p.formato) ? p.formato : 'VT')}</select></div>`,
+    { footer: '<button class="btn" data-close>Cancelar</button><button class="btn primary" id="sr-go">Incluir no espelho</button>' });
+  $('#sr-go', md.el).onclick = async () => {
+    try {
+      const prog = $('#sr-prog', md.el).value, data = $('#sr-date', md.el).value;
+      const rd = await api('GET', `/api/rundowns?programId=${prog}&data=${data}&create=1`);
+      await api('POST', `/api/rundowns/${rd.id}/items`, { pautaId: p.id, tipo: $('#sr-tipo', md.el).value });
+      md.close(); toast('Incluída no espelho.');
+      S.rd.programId = prog; S.rd.date = data;
+    } catch (e) { toast(e.message, true); }
+  };
+}
+
+// =============================================================== ESPELHO
+function computeRundown(rd) {
+  const prog = rd.program || {}; const wpm = prog.wpm || 170;
+  const start = toSec(prog.inicio || '00:00:00');
+  let acc = 0, jorn = 0, breaks = 0, block = 1, n = 0;
+  const rows = rd.items.map(it => {
+    const isBreak = it.tipo === 'INTERVALO';
+    const dead = it.status === 'caiu';
+    let cab = 0, vt = 0;
+    if (!isBreak) {
+      cab = it.tempoCabManual ? toSec(it.tempoCabManual) : readSec(it.cabeca, wpm);
+      vt = toSec(it.tempoVT);
+      if (!vt && READ_TYPES.includes(it.tipo)) vt = readSec(it.texto, wpm);
+    } else vt = toSec(it.tempoVT);
+    const total = dead ? 0 : cab + vt;
+    const hora = start + acc;
+    let pagina;
+    if (isBreak) pagina = 'INT';
+    else { n++; pagina = String.fromCharCode(64 + Math.min(block, 26)) + n; }
+    acc += total;
+    if (isBreak) { breaks += total; } else jorn += total;
+    const row = { it, cab, vt, total, hora, acc, pagina, block, isBreak, dead };
+    if (isBreak) { block++; n = 0; }
+    return row;
+  });
+  const previsto = toSec(prog.duracao || '0');
+  return { rows, total: acc, jorn, breaks, previsto, saldo: previsto - acc, start, fim: start + acc, blocks: block };
+}
+
+async function loadRundown(create) {
+  if (!S.rd.programId) { S.rundown = null; return; }
+  S.rundown = await api('GET', `/api/rundowns?programId=${S.rd.programId}&data=${S.rd.date}${create ? '&create=1' : ''}`);
+}
+async function viewEspelho() {
+  S.selItem = null;
+  $('#main').innerHTML = `
+  <div class="workspace ws-espelho">
+    <div class="rd-toolbar">
+      <select id="rd-prog" aria-label="Telejornal">${opts(S.programs.filter(p => p.ativo !== false).map(p => [p.id, p.name]), S.rd.programId)}</select>
+      <div class="datenav"><button class="btn sm" data-d="-1" aria-label="Dia anterior">‹</button><input type="date" id="rd-date" value="${S.rd.date}"><button class="btn sm" data-d="1" aria-label="Próximo dia">›</button></div>
+      <span id="rd-status"></span>
+      <div class="timers" id="timers"></div>
+    </div>
+    <section class="pane"><div class="pane-h" id="rd-actions"></div><div class="pane-b" id="rd-grid"></div></section>
+    <section class="pane story" id="story"></section>
+  </div>`;
+  $('#rd-prog').onchange = async e => { await flushItem(); await releaseLocks(); S.rd.programId = e.target.value; S.selItem = null; await refreshRundown(); };
+  $('#rd-date').onchange = async e => { await flushItem(); await releaseLocks(); S.rd.date = e.target.value || today(); S.selItem = null; await refreshRundown(); };
+  $$('.rd-toolbar [data-d]').forEach(b => b.onclick = async () => { await flushItem(); await releaseLocks(); S.rd.date = addDays(S.rd.date, +b.dataset.d); $('#rd-date').value = S.rd.date; S.selItem = null; await refreshRundown(); });
+  await refreshRundown();
+  S.pollTimer = setInterval(pollRundown, 4000);
+}
+async function refreshRundown() {
+  try { await loadRundown(false); } catch (e) { toast(e.message, true); }
+  renderRundown(); renderStory();
+}
+async function pollRundown() {
+  if (S.view !== 'espelho' || !S.rundown || S.itemDirty) return;
+  try {
+    const fresh = await api('GET', '/api/rundowns/' + S.rundown.id);
+    const changed = fresh.updatedAt !== S.rundown.updatedAt || JSON.stringify(fresh.items.map(i => i.lock)) !== JSON.stringify(S.rundown.items.map(i => i.lock));
+    if (!changed) return;
+    S.rundown = fresh; renderRundown();
+    const storyFocused = document.activeElement && document.activeElement.closest('#story');
+    if (!storyFocused) renderStory();
+  } catch { }
+}
+function renderRundown() {
+  const rd = S.rundown;
+  const grid = $('#rd-grid'), actions = $('#rd-actions'), timers = $('#timers'), st = $('#rd-status');
+  if (!grid) return;
+  if (!rd) {
+    timers.innerHTML = ''; st.innerHTML = ''; actions.innerHTML = '<h2>Espelho</h2>';
+    const prog = S.programs.find(p => p.id === S.rd.programId);
+    grid.innerHTML = prog ? `<div class="empty">Ainda não há espelho do <b>${esc(prog.name)}</b> para ${fmtDate(S.rd.date)}.<br><br><button class="btn primary" id="rd-create">Criar espelho</button></div>`
+      : `<div class="empty">Cadastre um telejornal na aba “Telejornais”.</div>`;
+    const b = $('#rd-create'); if (b) b.onclick = async () => { await loadRundown(true); renderRundown(); renderStory(); };
+    return;
+  }
+  const C = computeRundown(rd);
+  const closed = rd.status === 'fechado' && !S.perms.approveRundown;
+  st.innerHTML = `<span class="rdstatus ${rd.status}">${label(RD_STATUS, rd.status)}</span>`;
+  const T = (l, v, cls = '') => `<div class="timer ${cls}"><div class="t-l">${l}</div><div class="t-v">${v}</div></div>`;
+  timers.innerHTML = T('Início', fmtClock(C.start)) + T('Previsto', fmtDur(C.previsto, true)) + T('Jornalismo', fmtDur(C.jorn, true)) + T('Intervalos', fmtDur(C.breaks))
+    + T('Total', fmtDur(C.total, true)) + T(C.saldo >= 0 ? 'Sobra' : 'Estouro', fmtDur(Math.abs(C.saldo)), C.saldo < 0 ? 'over' : C.saldo > 0 ? 'under' : '') + T('Término', fmtClock(C.fim));
+  actions.innerHTML = `<h2>Espelho · ${esc(rd.program.name)}</h2><span class="hint">${weekday(rd.data)}, ${fmtDate(rd.data)} · ${C.blocks} bloco(s)</span><div style="flex:1"></div>
+    <div class="formbar">
+      <button class="btn sm primary" data-a="add" ${closed ? 'disabled' : ''}>+ Retranca</button>
+      <button class="btn sm" data-a="pauta" ${closed ? 'disabled' : ''}>+ Da pauta</button>
+      <button class="btn sm" data-a="break" ${closed ? 'disabled' : ''}>+ Intervalo</button>
+      <button class="btn sm onair-btn ${rd.status === 'no_ar' ? 'live' : ''}" data-a="onair" title="Modo no ar: o apresentador dá OK em cada retranca exibida">● No ar</button>
+      <button class="btn sm" data-a="prompter">Prompter</button>
+      <button class="btn sm" data-a="print">Imprimir</button>
+      ${S.perms.approveRundown ? `<select class="btn sm" data-a="status" aria-label="Status do espelho" style="width:auto">${opts(RD_STATUS, rd.status)}</select>` : ''}
+    </div>`;
+  actions.onclick = (e) => { const a = e.target.closest('[data-a]'); if (!a || a.tagName === 'SELECT') return; rundownAction(a.dataset.a); };
+  const ss = $('[data-a=status]', actions); if (ss) ss.onchange = async (e) => {
+    try { S.rundown = await api('PUT', '/api/rundowns/' + rd.id, { status: e.target.value }); renderRundown(); renderStory(); toast('Espelho: ' + label(RD_STATUS, e.target.value)); } catch (er) { toast(er.message, true); }
+  };
+  let lastBlock = 0;
+  const body = C.rows.map(r => {
+    let head = '';
+    if (!r.isBreak && r.block !== lastBlock) { lastBlock = r.block; head = `<tr class="blockhead"><td colspan="13">BLOCO ${r.block}</td></tr>`; }
+    const it = r.it, sel = S.selItem === it.id;
+    const lk = it.lock && !it.lock.mine ? ` <span class="lockico" title="Em edição por ${esc(it.lock.name)}">🔒</span>` : '';
+    return head + `<tr class="row ${r.isBreak ? 'break' : ''} ${r.dead ? 'caiu' : ''} ${sel ? 'sel' : ''} ${it.aoArAt ? 'aired' : ''}" data-id="${it.id}" draggable="${!closed}" ${it.aoArAt ? `title="Foi ao ar às ${new Date(it.aoArAt).toLocaleTimeString('pt-BR')} (OK de ${esc(it.aoArPor || '')})"` : ''}>
+      <td class="drag" title="Arraste para reordenar">⋮⋮</td>
+      <td class="mono">${r.pagina}</td>
+      <td class="retr">${esc(it.retranca)}${lk}${it.pautaId ? ' <span class="hint" title="Vinculada a pauta">◆</span>' : ''}</td>
+      <td><span class="tipo tipo-${esc(it.tipo).replace(/[^A-Z+]/g, '')}">${esc(it.tipo)}</span></td>
+      <td>${esc(it.apresentador)}</td><td>${esc(it.reporter)}</td><td>${esc(it.editor)}</td>
+      <td class="num">${r.isBreak ? '' : fmtDur(r.cab)}</td><td class="num">${fmtDur(r.vt)}</td><td class="num"><b>${fmtDur(r.total)}</b></td>
+      <td class="num">${fmtClock(r.hora)}</td>
+      <td class="num" style="color:var(--muted)">${fmtDur(r.acc, true)}</td>
+      <td>${it.aoArAt ? `<span class="pill aired-pill">✓ No ar ${new Date(it.aoArAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>` : r.isBreak ? '' : `<span class="pill st-${it.status}">${esc(label(ITEM_STATUS, it.status))}</span>`}</td></tr>`;
+  }).join('');
+  grid.innerHTML = `<table class="grid"><thead><tr><th></th><th>Pág</th><th>Retranca</th><th>Tipo</th><th>Apres.</th><th>Repórter</th><th>Editor</th><th style="text-align:right">Cab</th><th style="text-align:right">VT</th><th style="text-align:right">Total</th><th style="text-align:right">No ar</th><th style="text-align:right">Acum.</th><th>Status</th></tr></thead><tbody>${body}</tbody></table>
+    ${rd.items.length ? '' : '<div class="empty">Espelho vazio.</div>'}`;
+  grid.onclick = async (e) => { const tr = e.target.closest('tr.row'); if (tr) selectItem(tr.dataset.id); };
+  // arrastar e soltar
+  let dragId = null;
+  $$('tr.row', grid).forEach(tr => {
+    tr.addEventListener('dragstart', (e) => { dragId = tr.dataset.id; tr.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragId); });
+    tr.addEventListener('dragend', () => { tr.classList.remove('dragging'); $$('.dragover', grid).forEach(x => x.classList.remove('dragover')); });
+    tr.addEventListener('dragover', (e) => { if (!dragId) return; e.preventDefault(); $$('.dragover', grid).forEach(x => x.classList.remove('dragover')); tr.classList.add('dragover'); });
+    tr.addEventListener('drop', async (e) => {
+      e.preventDefault(); const target = tr.dataset.id; if (!dragId || dragId === target) return;
+      const ids = rd.items.map(i => i.id).filter(id => id !== dragId);
+      ids.splice(ids.indexOf(target), 0, dragId);
+      await reorder(ids); dragId = null;
+    });
+  });
+}
+async function reorder(ids) {
+  const rd = S.rundown;
+  rd.items = ids.map(id => rd.items.find(i => i.id === id)); renderRundown();
+  try { S.rundown = await api('POST', `/api/rundowns/${rd.id}/reorder`, { ids }); renderRundown(); }
+  catch (e) { toast(e.message, true); await refreshRundown(); }
+}
+async function rundownAction(a) {
+  const rd = S.rundown; if (!rd) return;
+  try {
+    if (a === 'add') { const it = await api('POST', `/api/rundowns/${rd.id}/items`, { afterId: S.selItem || undefined, apresentador: (rd.program.apresentadores || '').split(',')[0].trim().toUpperCase() }); await loadRundown(); await selectItem(it.id, true); }
+    if (a === 'break') { const n = rd.items.filter(i => i.tipo === 'INTERVALO').length + 1; const it = await api('POST', `/api/rundowns/${rd.id}/items`, { afterId: S.selItem || undefined, retranca: 'INTERVALO ' + n, tipo: 'INTERVALO', tempoVT: '02:30' }); await loadRundown(); await selectItem(it.id); }
+    if (a === 'pauta') pickPauta();
+    if (a === 'print') printRundown();
+    if (a === 'prompter') prompter();
+    if (a === 'onair') { await flushItem(); openOnAir(); }
+  } catch (e) { toast(e.message, true); }
+}
+async function pickPauta() {
+  const rd = S.rundown;
+  const list = (await api('GET', `/api/pautas?from=${addDays(rd.data, -3)}&to=${rd.data}`)).filter(p => p.status !== 'caiu');
+  const used = new Set(rd.items.map(i => i.pautaId).filter(Boolean));
+  const md = modal('Incluir retranca a partir da pauta', list.length ? `<p class="hint">Pautas dos últimos 3 dias. As já incluídas neste espelho aparecem marcadas.</p>
+    <input type="search" id="pp-q" placeholder="Filtrar…" style="margin-bottom:8px">
+    <table class="grid"><thead><tr><th>Retranca</th><th>Data</th><th>Status</th><th>Repórter</th><th>Formato</th><th></th></tr></thead><tbody>
+    ${list.map(p => `<tr class="row" data-id="${p.id}" data-s="${esc((p.retranca + ' ' + repName(p)).toLowerCase())}"><td class="retr">${esc(p.retranca)}</td><td class="mono">${fmtDate(p.data)}</td><td><span class="pill st-${p.status}">${esc(label(PAUTA_STATUS, p.status))}</span></td><td>${esc(repName(p))}</td><td>${esc(p.formato)}</td><td>${used.has(p.id) ? '✓ no espelho' : '<button class="btn sm primary">Incluir</button>'}</td></tr>`).join('')}
+    </tbody></table>` : '<div class="empty">Nenhuma pauta encontrada para os últimos dias.</div>', { wide: true });
+  const q = $('#pp-q', md.el); if (q) q.oninput = () => $$('tr[data-s]', md.el).forEach(tr => tr.classList.toggle('hidden', !tr.dataset.s.includes(q.value.toLowerCase())));
+  md.el.addEventListener('click', async (e) => {
+    const b = e.target.closest('button.primary'); if (!b) return;
+    const id = b.closest('tr').dataset.id; const p = list.find(x => x.id === id);
+    try {
+      const it = await api('POST', `/api/rundowns/${rd.id}/items`, { pautaId: id, tipo: TIPOS.includes(p.formato) ? p.formato : 'VT', afterId: S.selItem || undefined, apresentador: (rd.program.apresentadores || '').split(',')[0].trim().toUpperCase() });
+      md.close(); await loadRundown(); await selectItem(it.id); toast('Retranca incluída.');
+    } catch (er) { toast(er.message, true); }
+  });
+}
+async function selectItem(id, focusRetranca) {
+  if (S.selItem && S.selItem !== id) { await flushItem(); await releaseLocks(); }
+  S.selItem = id; renderRundown(); renderStory();
+  if (focusRetranca) setTimeout(() => { const r = $('#story [data-f=retranca]'); if (r) { r.focus(); r.select(); } }, 0);
+}
+const curItem = () => S.rundown && S.rundown.items.find(i => i.id === S.selItem);
+
+function renderStory() {
+  const el = $('#story'); if (!el) return;
+  const it = curItem();
+  if (!it) { el.innerHTML = `<div class="pane-h"><h2>Lauda</h2></div><div class="empty">Selecione uma retranca no espelho para editar a lauda.<br><br><span class="hint">Texto entre [colchetes] é instrução e não conta no tempo de leitura.</span></div>`; return; }
+  const rd = S.rundown; const prog = rd.program;
+  const closed = rd.status === 'fechado' && !S.perms.approveRundown;
+  const lockedBy = it.lock && !it.lock.mine ? it.lock.name : null;
+  const ro = (lockedBy || closed) ? 'disabled' : '';
+  const isBreak = it.tipo === 'INTERVALO';
+  const users = S.users.filter(u => u.active);
+  const F = (k) => esc(it[k] || '');
+  const stOpts = ITEM_STATUS.filter(([v]) => v !== 'aprovado' || S.perms.approveRundown || it.status === 'aprovado');
+  el.innerHTML = `
+    <div class="pane-h"><h2>Lauda</h2><span class="savestate" id="istate">${it.updatedByName ? 'Salvo · ' + esc(it.updatedByName) + ' ' + fmtDT(it.updatedAt) : 'Salvo'}</span>
+      <div class="formbar">
+        <button class="btn sm" data-m="-1" title="Subir" ${ro}>↑</button><button class="btn sm" data-m="1" title="Descer" ${ro}>↓</button>
+        ${it.pautaId ? `<button class="btn sm" id="s-pauta">Ver pauta</button><button class="btn sm" id="s-imp" title="Copia o texto da matéria escrito na pauta para o texto do VT" ${ro}>Puxar matéria</button>` : ''}
+        <button class="btn sm danger" id="s-del" ${ro}>Remover</button>
+      </div></div>
+    ${lockedBy ? `<div class="banner">🔒 Em edição por <b>${esc(lockedBy)}</b>. Modo leitura.</div>` : ''}
+    ${closed ? `<div class="banner red">Espelho fechado pela edição. Somente editores podem alterar.</div>` : ''}
+    <div class="pane-b"><div class="form" id="sform">
+      <div class="field"><label>Retranca</label><input type="text" class="retranca-input" data-f="retranca" value="${F('retranca')}" maxlength="80" ${ro}></div>
+      <div class="row3">
+        <div class="field"><label>Tipo</label><select data-f="tipo" ${ro}>${opts(TIPOS, it.tipo)}</select></div>
+        ${isBreak ? `<div class="field"><label>Duração do intervalo</label><input type="text" class="mono" data-f="tempoVT" value="${F('tempoVT')}" placeholder="mm:ss" ${ro}></div>` : `
+        <div class="field"><label>Status</label><select data-f="status" ${ro}>${opts(stOpts, it.status)}</select></div>
+        <div class="field"><label>Tempo VT / imagem</label><input type="text" class="mono" data-f="tempoVT" value="${F('tempoVT')}" placeholder="mm:ss" ${ro}></div>`}
+      </div>
+      ${isBreak ? `<div class="field"><label>Observação (comercial, chamadas)</label><textarea data-f="obs" rows="3" ${ro}>${F('obs')}</textarea></div>` : `
+      <div class="row3">
+        <div class="field"><label>Apresentador</label><input type="text" list="dl-apr" data-f="apresentador" value="${F('apresentador')}" ${ro}></div>
+        <div class="field"><label>Repórter</label><input type="text" list="dl-users" data-f="reporter" value="${F('reporter')}" ${ro}></div>
+        <div class="field"><label>Editor</label><input type="text" list="dl-users" data-f="editor" value="${F('editor')}" ${ro}></div>
+      </div>
+      <datalist id="dl-users">${users.map(u => `<option>${esc(u.name.toUpperCase())}</option>`).join('')}</datalist>
+      <datalist id="dl-apr">${(prog.apresentadores || '').split(',').map(s => s.trim()).filter(Boolean).map(a => `<option>${esc(a.toUpperCase())}</option>`).join('')}${users.filter(u => u.role === 'apresentador').map(u => `<option>${esc(u.name.toUpperCase())}</option>`).join('')}</datalist>
+
+      <div class="sec"><h3>Cabeça (leitura do apresentador) <span class="grow"></span><span class="readtime" id="rt-cab"></span></h3><div class="sb">
+        <textarea class="lauda" data-f="cabeca" rows="6" placeholder="Texto lido pelo apresentador. [Instruções entre colchetes não contam tempo]" ${ro}>${F('cabeca')}</textarea>
+        <div class="row2" style="margin-top:8px">
+          <div class="field"><label>Tempo de cabeça manual (opcional)</label><input type="text" class="mono" data-f="tempoCabManual" value="${F('tempoCabManual')}" placeholder="auto" ${ro}></div>
+          <div class="field"><label>Velocidade de leitura</label><input type="text" value="${prog.wpm || 170} palavras/min" disabled></div>
+        </div>
+      </div></div>
+      <div class="sec"><h3>Texto do VT / Off / Nota <span class="grow"></span><span class="readtime" id="rt-txt"></span></h3><div class="sb">
+        <textarea class="lauda" data-f="texto" rows="8" placeholder="[OFF] ...&#10;[SONORA] NOME / CARGO&#10;[PASSAGEM] ...&#10;Para NOTA/NC: texto lido pelo apresentador sobre imagens." ${ro}>${F('texto')}</textarea>
+      </div></div>
+      <div class="row2">
+        <div class="field"><label>Deixa (últimas palavras do VT)</label><input type="text" class="mono" data-f="deixa" value="${F('deixa')}" style="text-transform:uppercase" ${ro}></div>
+        <div class="field"><label>Observações da edição</label><input type="text" data-f="obs" value="${F('obs')}" ${ro}></div>
+      </div>
+      <div class="sec"><h3>GC — Gerador de caracteres</h3><div class="sb">
+        <textarea class="lauda small" data-f="gc" rows="3" placeholder="NOME / CARGO (uma linha por crédito)" ${ro}>${F('gc')}</textarea>
+      </div></div>`}
+    </div></div>`;
+
+  const updateRT = () => {
+    const wpm = prog.wpm || 170;
+    const a = $('#rt-cab'), b = $('#rt-txt');
+    if (a) a.textContent = `${wordCount(it.cabeca)} palavras · ${fmtDur(it.tempoCabManual ? toSec(it.tempoCabManual) : readSec(it.cabeca, wpm))}`;
+    if (b) b.textContent = `${wordCount(it.texto)} palavras · ${fmtDur(readSec(it.texto, wpm))}`;
+  };
+  updateRT();
+  const form = $('#sform');
+  const onEdit = async (e) => {
+    const t = e.target; const k = t.dataset.f; if (!k) return;
+    it[k] = (k === 'retranca') ? t.value.toUpperCase() : t.value;
+    if (!S.itemDirty) {
+      S.itemDirty = true;
+      const r = await acquireLock('i:' + it.id);
+      if (!r.ok) { toast(`Retranca em edição por ${r.lock.name}.`, true); }
+    }
+    const st = $('#istate'); if (st) { st.textContent = 'Editando…'; st.classList.add('dirty'); }
+    updateRT();
+    clearTimeout(S.itemSaveTimer); S.itemSaveTimer = setTimeout(() => flushItem(), 900);
+    if (k === 'tipo' || k === 'status') { await flushItem(); renderStory(); }
+  };
+  form.addEventListener('input', onEdit);
+  form.addEventListener('change', (e) => { if (e.target.tagName === 'SELECT') return; });
+  $$('[data-m]', el).forEach(b => b.onclick = async () => {
+    await flushItem();
+    const ids = S.rundown.items.map(i => i.id); const k = ids.indexOf(it.id); const j = k + Number(b.dataset.m);
+    if (j < 0 || j >= ids.length) return; [ids[k], ids[j]] = [ids[j], ids[k]]; await reorder(ids);
+  });
+  $('#s-del').onclick = async () => {
+    if (!confirm(`Remover ${it.retranca} do espelho?`)) return;
+    try { clearTimeout(S.itemSaveTimer); S.itemDirty = false; await api('DELETE', '/api/items/' + it.id); await releaseLocks(); S.selItem = null; await loadRundown(); renderRundown(); renderStory(); toast('Retranca removida.'); }
+    catch (e) { toast(e.message, true); }
+  };
+  const sp = $('#s-pauta'); if (sp) sp.onclick = () => showPautaReadOnly(it.pautaId);
+  const si = $('#s-imp'); if (si) si.onclick = async () => {
+    try {
+      const p = await api('GET', '/api/pautas/' + it.pautaId);
+      if (!String(p.materia || '').trim()) return toast('A pauta ainda não tem matéria escrita.', true);
+      if (String(it.texto || '').trim() && it.texto !== p.materia && !confirm('Substituir o texto atual do VT pela matéria da pauta?')) return;
+      const ta = $('#story [data-f=texto]'); ta.value = p.materia;
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      toast('Matéria copiada para a lauda.');
+    } catch (e) { toast(e.message, true); }
+  };
+}
+async function flushItem(showToast) {
+  clearTimeout(S.itemSaveTimer);
+  if (!S.itemDirty) return;
+  const it = curItem(); if (!it) { S.itemDirty = false; return; }
+  S.itemDirty = false;
+  try {
+    const saved = await api('PUT', '/api/items/' + it.id, it);
+    Object.assign(it, saved);
+    const st = $('#istate'); if (st) { st.textContent = 'Salvo'; st.classList.remove('dirty'); }
+    renderRundown();
+    if (showToast) toast('Lauda salva.');
+  } catch (e) { toast(e.message, true); }
+}
+async function showPautaReadOnly(id) {
+  try {
+    const p = await api('GET', '/api/pautas/' + id);
+    const md = modal(`Pauta · ${p.retranca}`, pautaHtml(p, true), { wide: true, footer: '<button class="btn" id="pp">Imprimir / PDF</button><button class="btn" id="op">Abrir para editar</button><button class="btn primary" data-close>Fechar</button>' });
+    $('#pp', md.el).onclick = () => printPauta(p);
+    $('#op', md.el).onclick = async () => { md.close(); S.pf.date = p.data; S.pf.allDates = false; await go('pautas'); openPauta(p.id); };
+  } catch (e) { toast(e.message, true); }
+}
+
+// =============================================================== impressão / prompter
+function pautaHtml(p, screen) {
+  const block = (t, v) => v ? `<h2${screen ? ' style="font-size:12px;color:var(--accent);text-transform:uppercase;letter-spacing:.08em;margin:14px 0 4px"' : ''}>${t}</h2><pre style="white-space:pre-wrap;font:inherit;margin:0">${esc(v)}</pre>` : '';
+  const ents = (p.entrevistados || []).filter(e => e.nome);
+  const rot = (p.roteiro || []).filter(r => r.local || r.acao);
+  return `<div>
+    ${screen ? '' : `<h1>PAUTA — ${esc(p.retranca)}</h1>`}
+    <div>${fmtDate(p.data)} · ${esc(p.editoria || '')} · ${esc(label(PAUTA_STATUS, p.status))} · Formato: ${esc(p.formato || '')}${p.programaId ? ' · ' + esc((S.programs.find(x => x.id === p.programaId) || {}).name || '') : ''}</div>
+    <div>Produção: ${esc(userName(p.produtorId))} · Repórter: ${esc(repName(p))} · Cinegrafista: ${esc(p.cinegrafista || '')} · Motorista: ${esc(p.motorista || '')} · Editor: ${esc(p.editorTexto || '')}</div>
+    <div>Horário: ${esc(p.horario || '')} · Local: ${esc(p.local || '')} ${p.endereco ? '— ' + esc(p.endereco) : ''}</div>
+    ${rot.length ? `<h2${screen ? ' style="font-size:12px;color:var(--accent);margin:14px 0 4px"' : ''}>ROTEIRO DE GRAVAÇÃO</h2><table class="${screen ? 'grid' : ''}"><tr><th>Hora</th><th>Local</th><th>O que gravar</th></tr>${rot.map(r => `<tr><td>${esc(r.hora)}</td><td>${esc(r.local)}</td><td>${esc(r.acao)}</td></tr>`).join('')}</table>` : ''}
+    ${block('Proposta', p.proposta)}
+    ${ents.length ? `<h2${screen ? ' style="font-size:12px;color:var(--accent);margin:14px 0 4px"' : ''}>MARCAÇÃO</h2><table class="${screen ? 'grid' : ''}"><tr><th>Nome</th><th>Função</th><th>Contato</th><th>Data/Hora</th><th>Local</th><th>Conf.</th></tr>${ents.map(e => `<tr><td>${esc(e.nome)}</td><td>${esc(e.funcao)}</td><td>${esc(e.telefone)}</td><td>${fmtDate(e.data)} ${esc(e.horario)}</td><td>${esc(e.local)}${e.obs ? '<br><i>' + esc(e.obs) + '</i>' : ''}</td><td>${e.confirmado ? 'Sim' : 'Não'}</td></tr>`).join('')}</table>` : ''}
+    ${block('Informações', p.historico)}
+    ${String(p.materia || '').trim() ? `<h2${screen ? ' style="font-size:12px;color:var(--accent);text-transform:uppercase;letter-spacing:.08em;margin:14px 0 4px"' : ''}>Matéria — ${esc(label(MATERIA_STATUS, p.materiaStatus || 'rascunho'))}${p.materiaAutorId ? ` · ${esc(userName(p.materiaAutorId))}, ${fmtDT(p.materiaAt)}` : ''} · ${materiaStats(p.materia)}</h2>
+      <pre class="${screen ? 'materia-view' : ''}" style="white-space:pre-wrap;margin:0;${screen ? '' : 'font:inherit'}">${markScript(esc(p.materia), screen)}</pre>` : ''}
+    ${block('Encaminhamento', p.encaminhamento)}
+    ${block('Sugestão de perguntas', p.perguntas)}${block('Imagens', p.imagens)}${block('Arte', p.arte)}${block('Observações', p.observacoes)}
+  </div>`;
+}
+// realça as marcações de roteiro [OFF], [SONORA]… (recebe texto já escapado)
+const markScript = (html, screen) => html.replace(/\[([^\]\n]{1,40})\]/g, screen ? '<b class="tag">[$1]</b>' : '<b>[$1]</b>');
+function doPrint(html) { $('#print-area').innerHTML = html; window.print(); }
+// Impressão / PDF com a identidade da emissora: escolhe pauta, matéria ou as duas
+function printPauta(p, preset) {
+  const temMat = String(p.materia || '').trim().length > 0;
+  const def = preset || (temMat ? 'ambos' : 'pauta');
+  const opt = (v, t, d, dis) => `<label class="printopt ${dis ? 'dis' : ''}"><input type="radio" name="pm" value="${v}" ${v === def ? 'checked' : ''} ${dis ? 'disabled' : ''}><span><b>${t}</b><br><span class="hint">${d}</span></span></label>`;
+  const md = modal(`Imprimir ou baixar PDF · ${p.retranca}`, `
+    <div class="printopts">
+      ${opt('ambos', 'Pauta + Matéria', 'A pauta completa e, em nova página, o texto da matéria.', !temMat)}
+      ${opt('pauta', 'Só a pauta', 'Retranca, proposta, marcação, informações e encaminhamento.')}
+      ${opt('materia', 'Só a matéria', 'O texto do repórter em formato de lauda (marcação | texto).', !temMat)}
+    </div>
+    ${temMat ? '' : '<p class="hint">Esta pauta ainda não tem matéria escrita.</p>'}
+    <p class="hint" style="margin-bottom:0"><b>Baixar PDF</b> salva o arquivo direto no computador, com o logotipo e o rodapé da emissora em todas as páginas.
+      ${S.org.logo ? '' : (S.perms.manageUsers ? 'O logotipo da emissora pode ser cadastrado em <b>Equipe → Identidade da emissora</b>.' : '')}</p>`,
+    { footer: '<button class="btn" data-close>Cancelar</button><button class="btn" id="pprint">Imprimir</button><button class="btn primary" id="pgo">⬇ Baixar PDF</button>' });
+  const choice = () => $('input[name=pm]:checked', md.el).value;
+  $('#pprint', md.el).onclick = () => { const v = choice(); md.close(); printDoc(p, v); };
+  $('#pgo', md.el).onclick = () => { const v = choice(); md.close(); printDoc(p, v, true); };
+}
+// divide a matéria em blocos [MARCAÇÃO] complemento + texto
+function parseScript(text) {
+  const rows = []; let cur = null;
+  String(text || '').replace(/\r/g, '').split('\n').forEach(line => {
+    const m = line.match(/^\s*\[([^\]\n]{1,40})\]\s*(.*)$/);
+    if (m) { cur = { tag: m[1].trim().toUpperCase(), sub: '', body: [] }; rows.push(cur);
+      // complemento na mesma linha: "NOME / CARGO" fica na coluna da marcação; frase longa vai para o texto
+      if (m[2] && (/^[^a-zà-ú]*$/.test(m[2]) || m[2].length <= 40) && !/[.!?"]$/.test(m[2])) cur.sub = m[2]; else if (m[2]) cur.body.push(m[2]);
+    } else { if (!cur) { cur = { tag: '', sub: '', body: [] }; rows.push(cur); } cur.body.push(line); }
+  });
+  return rows.map(r => Object.assign(r, { body: r.body.join('\n').replace(/^\n+|\n+$/g, '') })).filter(r => r.tag || r.body);
+}
+function printDoc(p, mode, download) {
+  const o = S.org || {}; const color = o.printColor || '#0b3566';
+  const prog = p.programaId ? (S.programs.find(x => x.id === p.programaId) || {}).name || '' : '';
+  const head = (kind) => `<div class="doc-h">
+      <div class="doc-logo">${o.logo ? `<img src="${esc(o.logo)}" alt="">` : `<div class="doc-org">${esc(o.name || '')}</div>`}</div>
+      <div class="doc-t"><div class="doc-kind">${kind}</div><div class="doc-retr">${esc(p.retranca)}</div>
+        <div class="doc-sub">${p.data ? `${esc(weekday(p.data))}, ${fmtDate(p.data)}` : ''}${prog ? ' · ' + esc(prog) : ''}</div></div></div>`;
+  const meta = (pairs) => `<table class="doc-meta"><tbody>${pairs.reduce((acc, x, i) => { if (i % 3 === 0) acc.push([]); acc[acc.length - 1].push(x); return acc; }, [])
+    .map(row => `<tr>${row.map(([l, v]) => `<th>${l}</th><td>${esc(v || '—')}</td>`).join('')}${'<th></th><td></td>'.repeat(3 - row.length)}</tr>`).join('')}</tbody></table>`;
+  const sec = (t, body) => body ? `<div class="doc-sec"><div class="doc-st">${t}</div>${body}</div>` : '';
+  const txt = (v) => String(v || '').trim() ? `<div class="doc-txt">${esc(v)}</div>` : '';
+  const ents = (p.entrevistados || []).filter(e => e.nome);
+  const rot = (p.roteiro || []).filter(r => r.local || r.acao);
+
+  const pautaPart = () => `<div class="doc">${head('PAUTA')}
+    ${meta([['Editoria', p.editoria], ['Formato', p.formato], ['Status', label(PAUTA_STATUS, p.status)],
+      ['Repórter', repName(p)], ['Cinegrafista', p.cinegrafista], ['Motorista', p.motorista],
+      ['Produção', userName(p.produtorId)], ['Editor de texto', p.editorTexto], ['Saída / início', p.horario],
+      ['Prioridade', label(PRIORIDADES, p.prioridade)]])}
+    ${sec('Proposta', txt(p.proposta))}
+    ${sec('Marcação', (ents.length ? `<table class="doc-tab"><thead><tr><th>Entrevistado</th><th>Função</th><th>Contato</th><th>Data / hora</th><th>Local</th><th>Conf.</th></tr></thead><tbody>
+        ${ents.map(e => `<tr><td><b>${esc(e.nome)}</b></td><td>${esc(e.funcao)}</td><td>${esc(e.telefone)}</td><td>${fmtDate(e.data)} ${esc(e.horario)}</td><td>${esc(e.local)}${e.obs ? `<div class="doc-obs">${esc(e.obs)}</div>` : ''}</td><td>${e.confirmado ? '✓ Sim' : 'Não'}</td></tr>`).join('')}</tbody></table>` : '')
+      + (p.local || p.endereco ? `<div class="doc-txt" style="margin-top:6px"><b>Local principal:</b> ${esc(p.local || '')}${p.endereco ? ' — ' + esc(p.endereco) : ''}${p.horario ? ` · <b>Horário:</b> ${esc(p.horario)}` : ''}</div>` : '')
+      + (rot.length ? `<table class="doc-tab" style="margin-top:6px"><thead><tr><th style="width:60px">Hora</th><th>Local</th><th>O que gravar</th></tr></thead><tbody>${rot.map(r => `<tr><td>${esc(r.hora)}</td><td>${esc(r.local)}</td><td>${esc(r.acao)}</td></tr>`).join('')}</tbody></table>` : ''))}
+    ${sec('Informações', txt(p.historico))}
+    ${sec('Encaminhamento', txt(p.encaminhamento))}
+    ${sec('Sugestão de perguntas', txt(p.perguntas))}
+    ${sec('Imagens', txt(p.imagens))}${sec('Arte', txt(p.arte))}${sec('Observações', txt(p.observacoes))}
+  </div>`;
+
+  const materiaPart = () => {
+    const rows = parseScript(p.materia); const w = wordCount(p.materia);
+    return `<div class="doc">${head('MATÉRIA')}
+    ${meta([['Repórter', repName(p) || userName(p.materiaAutorId)], ['Situação', label(MATERIA_STATUS, p.materiaStatus || 'rascunho')], ['Formato', p.formato],
+      ['Palavras', String(w)], ['Tempo estimado', w ? fmtDur(Math.round(w * 60 / 170)) : ''], ['Última edição', p.materiaAutorId ? `${userName(p.materiaAutorId)} · ${fmtDT(p.materiaAt)}` : '']])}
+    <table class="doc-script"><thead><tr><th>Marcação</th><th>Texto</th></tr></thead><tbody>
+      ${rows.map(r => `<tr class="k-${esc(r.tag.split(/\s/)[0].toLowerCase())}"><td>${r.tag ? `<b>${esc(r.tag)}</b>` : ''}${r.sub ? `<div>${esc(r.sub)}</div>` : ''}</td><td>${esc(r.body)}</td></tr>`).join('')}
+    </tbody></table>
+    ${p.proposta ? `<div class="doc-sec"><div class="doc-st">Proposta da pauta</div><div class="doc-txt">${esc(p.proposta)}</div></div>` : ''}
+  </div>`;
+  };
+
+  const parts = mode === 'pauta' ? [pautaPart()] : mode === 'materia' ? [materiaPart()] : [pautaPart(), materiaPart()];
+  const brand = /^#[0-9a-fA-F]{6}$/.test(color) ? color : '#0b3566';
+  const fileName = `${mode === 'materia' ? 'MATERIA' : 'PAUTA'} - ${p.retranca} - ${fmtDate(p.data).replace(/\//g, '-')}`;
+  const footL = `${o.name || ''}${o.printFooter ? ' · ' + o.printFooter : ''}`;
+  const footR = `${download ? 'Gerado' : 'Impresso'} por ${S.me.name} em ${new Date().toLocaleString('pt-BR')}`;
+  if (download) return downloadPdf(p, mode, brand, fileName, footL, footR);
+  const foot = `<div class="doc-f"><span>${esc(footL)}</span><span>${esc(footR)}</span></div>`;
+  const oldTitle = document.title;
+  // o título vira o nome sugerido do arquivo PDF
+  document.title = fileName;
+  const restore = () => { document.title = oldTitle; window.removeEventListener('afterprint', restore); };
+  window.addEventListener('afterprint', restore);
+  $('#print-area').innerHTML = `<div class="docs" style="--brand:${brand}">${parts.join('')}${foot}</div>`;
+  const imgs = $$('#print-area img');
+  Promise.all(imgs.map(i => i.complete ? 1 : new Promise(r => { i.onload = i.onerror = r; }))).then(() => { window.print(); setTimeout(restore, 1000); });
+}
+// Baixa o PDF direto, VETORIAL (texto, linhas e tabelas nítidos em qualquer zoom),
+// com logotipo, cor e rodapé da emissora em todas as páginas.
+const WINANSI_EXTRA = '€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ';
+// fontes padrão do PDF só têm o alfabeto latino: troca o que não existe nelas
+const pdfSafe = (s) => String(s == null ? '' : s).normalize('NFC').replace(/[✓✔]/g, 'Sim').replace(/\t/g, '    ')
+  .replace(/[^\n\x20-\x7e\xa0-\xff]/g, c => WINANSI_EXTRA.includes(c) ? c : '');
+// carrega o logotipo como imagem nítida (SVG é convertido em PNG de alta resolução)
+function pdfLogo(src) {
+  return new Promise((ok) => {
+    if (!src) return ok(null);
+    const img = new Image();
+    img.onerror = () => ok(null);
+    img.onload = () => {
+      const isSvg = src.startsWith('data:image/svg');
+      const w = img.naturalWidth || 600, h = img.naturalHeight || 240;
+      if (!isSvg && /^data:image\/(png|jpeg)/.test(src)) return ok({ data: src, fmt: src.startsWith('data:image/png') ? 'PNG' : 'JPEG', w, h });
+      const k = Math.max(1, 2400 / w);                    // webp/svg → PNG grande
+      const c = document.createElement('canvas'); c.width = Math.round(w * k); c.height = Math.round(h * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      ok({ data: c.toDataURL('image/png'), fmt: 'PNG', w: c.width, h: c.height });
+    };
+    img.src = src;
+  });
+}
+async function downloadPdf(p, mode, brandHex, fileName, footL, footR) {
+  toast('Gerando PDF…');
+  try {
+    if (!window.jspdf) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+    if (!window.jspdf.jsPDF.API.autoTable) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js');
+  } catch { return toast('Não foi possível carregar o gerador de PDF. Verifique a internet ou use Imprimir → Salvar como PDF.', true); }
+  try {
+    const o = S.org || {};
+    const doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', compress: true });
+    doc.setProperties({ title: fileName, author: o.name || '', creator: 'Redação' });
+    const W = 210, H = 297, M = 14, TOP = 16, BOT = H - 20, CW = W - 2 * M;
+    const B = [1, 3, 5].map(i => parseInt(brandHex.slice(i, i + 2), 16));
+    const GRAY = [90, 96, 105], LINE = [214, 219, 225], SOFT = [243, 245, 248];
+    const logo = await pdfLogo(o.logo);
+    const prog = p.programaId ? (S.programs.find(x => x.id === p.programaId) || {}).name || '' : '';
+    let y = TOP;
+    const font = (style, size, color) => { doc.setFont('helvetica', style); doc.setFontSize(size); doc.setTextColor(...(color || [20, 22, 26])); };
+    const lh = (size, f = 1.38) => size * 0.3528 * f;      // altura da linha em mm
+    const ensure = (h) => { if (y + h > BOT) { doc.addPage(); y = TOP; } };
+
+    const header = (kind) => {
+      const top = y;
+      let leftBottom = top + 20;
+      if (logo) {
+        const s = Math.min(50 / logo.w, 20 / logo.h); const lw = logo.w * s, lhh = logo.h * s;
+        doc.addImage(logo.data, logo.fmt, M, top + (20 - lhh) / 2, lw, lhh, undefined, 'FAST');
+      } else { font('bold', 15, B); doc.text(pdfSafe(o.name || ''), M, top + 11); }
+      // etiqueta PAUTA / MATÉRIA
+      font('bold', 8, [255, 255, 255]);
+      const tw = doc.getTextWidth(kind) + kind.length * 0.6 + 7;
+      doc.setFillColor(...B); doc.roundedRect(W - M - tw, top, tw, 6, 0.8, 0.8, 'F');
+      doc.text(kind, W - M - tw / 2, top + 4.2, { align: 'center', charSpace: 0.6 });
+      // retranca
+      font('bold', 17);
+      const rl = doc.splitTextToSize(pdfSafe(p.retranca), 122);
+      let ry = top + 12.5;
+      rl.forEach(l => { doc.text(l, W - M, ry, { align: 'right' }); ry += lh(17, 1.15); });
+      const sub = `${p.data ? weekday(p.data).replace(/^./, c => c.toUpperCase()) + ', ' + fmtDate(p.data) : ''}${prog ? ' · ' + prog : ''}`;
+      font('normal', 9, GRAY); doc.text(pdfSafe(sub), W - M, ry - 1.5, { align: 'right' });
+      const bottom = Math.max(leftBottom, ry) + 2;
+      doc.setDrawColor(...B); doc.setLineWidth(1.1); doc.line(M, bottom, W - M, bottom);
+      y = bottom + 4;
+    };
+    const metaTable = (pairs) => {
+      const rows = []; for (let i = 0; i < pairs.length; i += 3) rows.push(pairs.slice(i, i + 3));
+      const body = rows.map(r => { const c = []; for (let i = 0; i < 3; i++) { const x = r[i]; c.push(x ? pdfSafe(x[0]).toUpperCase() : '', x ? pdfSafe(x[1] || '—') : ''); } return c; });
+      const thStyle = { fillColor: SOFT, textColor: B, fontStyle: 'bold', fontSize: 6.6, cellWidth: 30 };
+      doc.autoTable({ startY: y, margin: { left: M, right: M, top: TOP, bottom: H - BOT }, body, theme: 'plain',
+        styles: { font: 'helvetica', fontSize: 9, textColor: [20, 22, 26], cellPadding: { top: 1.7, bottom: 1.7, left: 2, right: 2 }, lineColor: LINE, lineWidth: { bottom: 0.2 }, valign: 'middle' },
+        columnStyles: { 0: thStyle, 2: thStyle, 4: thStyle } });
+      y = doc.lastAutoTable.finalY + 5;
+    };
+    const secTitle = (t) => {
+      ensure(14);
+      font('bold', 8.5, B); doc.text(pdfSafe(t).toUpperCase(), M, y + 3.5, { charSpace: 0.4 });
+      doc.setDrawColor(...B); doc.setLineWidth(0.35); doc.line(M, y + 5, W - M, y + 5);
+      y += 8;
+    };
+    const para = (txt, size = 10.5, style = 'normal') => {
+      font(style, size);
+      const h = lh(size);
+      String(pdfSafe(txt)).split('\n').forEach(par => {
+        const lines = par.trim() ? doc.splitTextToSize(par, CW) : [''];
+        lines.forEach(l => { ensure(h); doc.text(l, M, y + h * 0.78); y += h; });
+      });
+      y += 3;
+    };
+    const section = (t, txt) => { if (String(txt || '').trim()) { secTitle(t); para(txt); } };
+    const gridTable = (head, body, colStyles = {}) => {
+      doc.autoTable({ startY: y, margin: { left: M, right: M, top: TOP, bottom: H - BOT }, head: [head.map(pdfSafe)], body: body.map(r => r.map(pdfSafe)), theme: 'grid',
+        styles: { font: 'helvetica', fontSize: 8.6, textColor: [20, 22, 26], lineColor: [204, 210, 217], lineWidth: 0.2, cellPadding: 1.8, valign: 'top' },
+        headStyles: { fillColor: B, textColor: 255, fontStyle: 'bold', fontSize: 7.2, lineColor: B },
+        columnStyles: colStyles });
+      y = doc.lastAutoTable.finalY + 4;
+    };
+
+    const pautaDoc = () => {
+      header('PAUTA');
+      metaTable([['Editoria', p.editoria], ['Formato', p.formato], ['Status', label(PAUTA_STATUS, p.status)],
+        ['Repórter', repName(p)], ['Cinegrafista', p.cinegrafista], ['Motorista', p.motorista],
+        ['Produção', userName(p.produtorId)], ['Editor de texto', p.editorTexto], ['Saída / início', p.horario],
+        ['Prioridade', label(PRIORIDADES, p.prioridade)]]);
+      section('Proposta', p.proposta);
+      const ents = (p.entrevistados || []).filter(e => e.nome);
+      const rot = (p.roteiro || []).filter(r => r.local || r.acao);
+      if (ents.length || p.local || p.endereco || rot.length) {
+        secTitle('Marcação');
+        if (ents.length) gridTable(['Entrevistado', 'Função', 'Contato', 'Data / hora', 'Local', 'Conf.'],
+          ents.map(e => [e.nome, e.funcao, e.telefone, `${fmtDate(e.data)} ${e.horario || ''}`.trim(), (e.local || '') + (e.obs ? `\nObs.: ${e.obs}` : ''), e.confirmado ? 'Sim' : 'Não']),
+          { 0: { fontStyle: 'bold' }, 5: { cellWidth: 13, halign: 'center' } });
+        if (p.local || p.endereco) para(`Local principal: ${p.local || ''}${p.endereco ? ' — ' + p.endereco : ''}${p.horario ? ' · Horário: ' + p.horario : ''}`, 9.5);
+        if (rot.length) gridTable(['Hora', 'Local', 'O que gravar'], rot.map(r => [r.hora, r.local, r.acao]), { 0: { cellWidth: 16 } });
+      }
+      section('Informações', p.historico);
+      section('Encaminhamento', p.encaminhamento);
+      section('Sugestão de perguntas', p.perguntas);
+      section('Imagens', p.imagens); section('Arte', p.arte); section('Observações', p.observacoes);
+    };
+    const materiaDoc = () => {
+      header('MATÉRIA');
+      const w = wordCount(p.materia);
+      metaTable([['Repórter', repName(p) || userName(p.materiaAutorId)], ['Situação', label(MATERIA_STATUS, p.materiaStatus || 'rascunho')], ['Formato', p.formato],
+        ['Palavras', String(w)], ['Tempo estimado', w ? fmtDur(Math.round(w * 60 / 170)) : ''], ['Última edição', p.materiaAutorId ? `${userName(p.materiaAutorId)} · ${fmtDT(p.materiaAt)}` : '']]);
+      const rows = parseScript(p.materia);
+      doc.autoTable({ startY: y, margin: { left: M, right: M, top: TOP, bottom: H - BOT }, theme: 'plain',
+        head: [['MARCAÇÃO', 'TEXTO']],
+        body: rows.map(r => [pdfSafe(r.tag + (r.sub ? '\n' + r.sub : '')), pdfSafe(r.body)]),
+        styles: { font: 'helvetica', fontSize: 11.5, textColor: [20, 22, 26], cellPadding: { top: 2.6, bottom: 2.6, left: 3, right: 3 }, lineColor: LINE, lineWidth: { bottom: 0.2 }, valign: 'top', minCellHeight: 8 },
+        headStyles: { fillColor: B, textColor: 255, fontStyle: 'bold', fontSize: 7.5, lineWidth: 0 },
+        columnStyles: { 0: { cellWidth: 50, fontSize: 9, fontStyle: 'bold', textColor: B } },
+        didParseCell: (d) => { if (d.section === 'body' && d.column.index === 1 && /^(SONORA|PASSAGEM)/.test(rows[d.row.index].tag)) d.cell.styles.fontStyle = 'italic'; },
+        didDrawCell: (d) => { if (d.section === 'body' && d.column.index === 0) { doc.setDrawColor(...B); doc.setLineWidth(0.6); doc.line(d.cell.x + d.cell.width, d.cell.y, d.cell.x + d.cell.width, d.cell.y + d.cell.height); } } });
+      y = doc.lastAutoTable.finalY + 6;
+      section('Proposta da pauta', p.proposta);
+    };
+
+    if (mode !== 'materia') pautaDoc();
+    if (mode !== 'pauta') { if (mode === 'ambos') { doc.addPage(); y = TOP; } materiaDoc(); }
+
+    // rodapé em todas as páginas
+    const n = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= n; i++) {
+      doc.setPage(i);
+      doc.setDrawColor(...LINE); doc.setLineWidth(0.3); doc.line(M, H - 13, W - M, H - 13);
+      font('normal', 7.5, GRAY);
+      doc.text(pdfSafe(footL), M, H - 9);
+      doc.text(pdfSafe(`${footR} · página ${i} de ${n}`), W - M, H - 9, { align: 'right' });
+    }
+    const safe = fileName.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\w .-]+/g, ' ').replace(/\s+/g, ' ').trim();
+    doc.save(safe + '.pdf');
+    toast('PDF baixado.');
+  } catch (e) { console.error(e); toast('Erro ao gerar o PDF: ' + e.message, true); }
+}
+function printPautaList() {
+  doPrint(`<h1>Pautas — ${S.pf.allDates ? 'todas as datas' : fmtDate(S.pf.date)}</h1><div style="font-size:9pt">${esc(S.org.name)}</div><br>
+    <table><tr><th>Retranca</th><th>Data</th><th>Hora</th><th>Status</th><th>Editoria</th><th>Repórter</th><th>Local</th><th>Proposta</th></tr>
+    ${S.pautas.map(p => `<tr><td><b>${esc(p.retranca)}</b></td><td>${fmtDate(p.data)}</td><td>${esc(p.horario)}</td><td>${esc(label(PAUTA_STATUS, p.status))}</td><td>${esc(p.editoria)}</td><td>${esc(repName(p))}</td><td>${esc(p.local)}</td><td>${esc(p.proposta)}</td></tr>`).join('')}</table>`);
+}
+function printRundown() {
+  const rd = S.rundown; if (!rd) return; const C = computeRundown(rd);
+  const withScripts = confirm('Incluir as laudas (textos) na impressão?\nOK = espelho + laudas · Cancelar = só o espelho');
+  doPrint(`<h1>ESPELHO — ${esc(rd.program.name)}</h1><div>${weekday(rd.data)}, ${fmtDate(rd.data)} · Início ${fmtClock(C.start)} · Previsto ${fmtDur(C.previsto, true)} · Total ${fmtDur(C.total, true)} · ${C.saldo >= 0 ? 'Sobra' : 'Estouro'} ${fmtDur(Math.abs(C.saldo))} · Status: ${label(RD_STATUS, rd.status)}</div><br>
+    <table><tr><th>Pág</th><th>Retranca</th><th>Tipo</th><th>Apres.</th><th>Repórter</th><th>Editor</th><th>Cab</th><th>VT</th><th>Total</th><th>No ar</th><th>Status</th></tr>
+    ${C.rows.map(r => `<tr class="${r.isBreak ? 'brk' : ''}"><td>${r.pagina}</td><td><b>${esc(r.it.retranca)}</b></td><td>${esc(r.it.tipo)}</td><td>${esc(r.it.apresentador)}</td><td>${esc(r.it.reporter)}</td><td>${esc(r.it.editor)}</td><td>${r.isBreak ? '' : fmtDur(r.cab)}</td><td>${fmtDur(r.vt)}</td><td>${fmtDur(r.total)}</td><td>${fmtClock(r.hora)}</td><td>${r.isBreak ? '' : esc(label(ITEM_STATUS, r.it.status))}</td></tr>`).join('')}</table>
+    ${withScripts ? C.rows.filter(r => !r.isBreak).map(r => `<div class="story"><h2>${r.pagina} · ${esc(r.it.retranca)} · ${esc(r.it.tipo)} · ${fmtDur(r.total)}</h2>
+      ${r.it.cabeca ? `<p><b>${esc(r.it.apresentador || 'APRESENTADOR')}:</b></p><pre>${esc(r.it.cabeca).toUpperCase()}</pre>` : ''}
+      ${r.it.texto ? `<p><b>TEXTO / VT:</b></p><pre>${esc(r.it.texto)}</pre>` : ''}
+      ${r.it.deixa ? `<p><b>DEIXA:</b> ${esc(r.it.deixa).toUpperCase()}</p>` : ''}
+      ${r.it.gc ? `<p><b>GC:</b></p><pre>${esc(r.it.gc)}</pre>` : ''}</div>`).join('') : ''}`);
+}
+// =============================================================== MODO NO AR
+// O apresentador (ou o editor no switcher) dá OK em cada retranca assim que ela termina.
+function openOnAir() {
+  if (!S.rundown || $('#onair')) return;
+  const ov = document.createElement('div'); ov.id = 'onair'; ov.className = 'onair';
+  document.body.appendChild(ov);
+  let busy = false;
+  const secs = (iso) => iso ? new Date(iso).getTime() / 1000 : null;
+  const nowS = () => Date.now() / 1000;
+  const clockOf = (iso) => iso ? new Date(iso).toLocaleTimeString('pt-BR') : '';
+  const calc = () => {
+    const rd = S.rundown; const C = computeRundown(rd);
+    const live = C.rows.filter(r => !r.dead);
+    let prev = secs(rd.noArInicio);
+    // duração real: do OK anterior (ou do início) até o OK desta retranca
+    live.forEach(r => { const t = secs(r.it.aoArAt); if (t != null) { r.real = prev != null ? Math.max(0, t - prev) : null; prev = t; } });
+    const curIdx = live.findIndex(r => !r.it.aoArAt);
+    const cur = curIdx >= 0 ? live[curIdx] : null, next = curIdx >= 0 ? live[curIdx + 1] : null;
+    const started = !!rd.noArInicio, ended = rd.status === 'encerrado';
+    const curElapsed = started && cur && !ended ? Math.max(0, nowS() - prev) : 0;
+    const remaining = curIdx < 0 ? 0 : live.slice(curIdx).reduce((a, r) => a + r.total, 0) - Math.min(curElapsed, cur ? cur.total : 0);
+    const plannedEnd = C.start + C.previsto;            // segundos do dia
+    const d = new Date(); const nowDay = d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
+    const projEnd = started && !ended ? nowDay + remaining : C.fim;
+    return { rd, C, live, cur, next, started, ended, curElapsed, plannedEnd, projEnd, saldo: plannedEnd - projEnd, done: live.filter(r => r.it.aoArAt).length };
+  };
+  const render = () => {
+    if (!S.rundown) return close();
+    const K = calc(); const { rd, cur, next } = K;
+    const st = K.ended ? ['enc', 'ENCERRADO'] : K.started ? ['live', 'NO AR'] : ['pre', 'PRÉ-AR'];
+    const T = (l, v, cls = '') => `<div class="oa-t ${cls}"><span>${l}</span><b>${v}</b></div>`;
+    const over = cur && cur.total && K.curElapsed > cur.total;
+    ov.innerHTML = `
+      <div class="oa-top">
+        <span class="oa-badge ${st[0]}">● ${st[1]}</span>
+        <div class="oa-prog"><b>${esc(rd.program.name)}</b><span>${esc(weekday(rd.data))}, ${fmtDate(rd.data)}</span></div>
+        <div class="oa-timers">
+          ${T('Relógio', new Date().toLocaleTimeString('pt-BR'), 'clock')}
+          ${T('Início real', K.started ? clockOf(rd.noArInicio) : fmtClock(K.C.start) + ' prev.')}
+          ${T('Decorrido', K.started ? fmtDur(((K.ended ? secs(rd.noArFim) : nowS()) - secs(rd.noArInicio)), true) : '—')}
+          ${T('Término previsto', fmtClock(K.plannedEnd))}
+          ${T('Término projetado', fmtClock(K.projEnd))}
+          ${T(K.saldo >= 0 ? 'Sobra' : 'Estouro', fmtDur(Math.abs(K.saldo)), K.saldo < 0 ? 'over' : 'under')}
+        </div>
+        <div class="oa-btns">
+          ${!K.started || K.ended ? `<button class="btn primary" data-oa="start">▶ ${K.ended ? 'Reabrir' : 'Iniciar jornal'}</button>` : `<button class="btn" data-oa="end">■ Encerrar</button>`}
+          ${S.perms.approveRundown ? '<button class="btn" data-oa="reset" title="Apaga todos os OKs deste espelho">Zerar</button>' : ''}
+          <button class="btn" data-oa="close" title="Esc">Fechar</button>
+        </div>
+      </div>
+      <div class="oa-body">
+        <section class="oa-now">
+          ${cur ? `
+            <div class="oa-lbl">${K.started ? 'NO AR AGORA' : 'PRIMEIRA RETRANCA'}</div>
+            <div class="oa-cur ${cur.isBreak ? 'brk' : ''}">
+              <div class="oa-pg">${cur.pagina}</div>
+              <div class="oa-ret">${esc(cur.it.retranca)}</div>
+              <div class="oa-meta"><span class="tipo">${esc(cur.it.tipo)}</span> ${cur.it.apresentador ? esc(cur.it.apresentador) : ''}${cur.it.reporter ? ' · ' + esc(cur.it.reporter) : ''}</div>
+              <div class="oa-clock ${over ? 'over' : ''}">${K.started ? fmtDur(K.curElapsed) : '00:00'} <small>/ ${fmtDur(cur.total)}</small></div>
+              <div class="oa-bar"><i style="width:${cur.total ? Math.min(100, K.curElapsed / cur.total * 100) : 0}%" class="${over ? 'over' : ''}"></i></div>
+              ${cur.it.deixa ? `<div class="oa-deixa"><span>DEIXA</span> ${esc(cur.it.deixa).toUpperCase()}</div>` : ''}
+            </div>
+            <button class="oa-ok" data-oa="ok">✓ OK — FOI AO AR<small>Espaço ou Enter</small></button>
+            ${next ? `<div class="oa-next"><span>A SEGUIR</span> <b>${next.pagina} · ${esc(next.it.retranca)}</b> <span class="tipo">${esc(next.it.tipo)}</span> ${fmtDur(next.total)}</div>` : '<div class="oa-next"><span>A SEGUIR</span> fim do espelho</div>'}
+          ` : `<div class="oa-done">✓ Todas as retrancas foram ao ar.<br><span class="hint">${K.ended ? 'Jornal encerrado.' : 'Clique em “Encerrar” para registrar o fim do jornal.'}</span></div>`}
+          <div class="hint" style="margin-top:12px">${K.done}/${K.live.length} retrancas exibidas · Desfazer o último OK: Backspace · Clique no ✓ da lista para corrigir.</div>
+        </section>
+        <section class="oa-list"><table class="grid"><thead><tr><th></th><th>Pág</th><th>Retranca</th><th>Tipo</th><th class="num">Prev.</th><th class="num">Hora prev.</th><th class="num">OK às</th><th class="num">Real</th><th class="num">Dif.</th></tr></thead><tbody>
+          ${K.C.rows.map(r => { const it = r.it; const isCur = cur && cur.it.id === it.id; const dif = r.real != null ? r.real - r.total : null;
+            return `<tr class="${it.aoArAt ? 'aired' : ''} ${isCur ? 'cur' : ''} ${r.dead ? 'caiu' : ''} ${r.isBreak ? 'break' : ''}" data-id="${it.id}">
+              <td>${r.dead ? '' : `<button class="oa-chk ${it.aoArAt ? 'on' : ''}" data-tog="${it.id}" aria-label="${it.aoArAt ? 'Desmarcar' : 'Marcar como exibida'}">${it.aoArAt ? '✓' : ''}</button>`}</td>
+              <td class="mono">${r.pagina}</td><td class="retr">${esc(it.retranca)}${r.dead ? ' <span class="hint">(caiu)</span>' : ''}</td><td><span class="tipo">${esc(it.tipo)}</span></td>
+              <td class="num">${fmtDur(r.total)}</td><td class="num">${fmtClock(r.hora)}</td>
+              <td class="num">${it.aoArAt ? `<span title="OK de ${esc(it.aoArPor || '')}">${clockOf(it.aoArAt)}</span>` : ''}</td>
+              <td class="num">${r.real != null ? fmtDur(r.real) : ''}</td>
+              <td class="num ${dif > 0 ? 'neg' : dif < 0 ? 'pos' : ''}">${dif != null ? (dif > 0 ? '+' : dif < 0 ? '−' : '') + fmtDur(Math.abs(dif)) : ''}</td></tr>`; }).join('')}
+        </tbody></table></section>
+      </div>`;
+    const cr = $('.oa-list tr.cur', ov); if (cr && !ov.dataset.scrolled) { cr.scrollIntoView({ block: 'center' }); ov.dataset.scrolled = '1'; }
+  };
+  const apply = async (fn) => {
+    if (busy) return; busy = true;
+    try { S.rundown = await fn(); render(); renderRundown(); } catch (e) { toast(e.message, true); } finally { busy = false; }
+  };
+  const mark = (id, ok) => {
+    const it = S.rundown.items.find(i => i.id === id); if (!it) return;
+    it.aoArAt = ok ? new Date().toISOString() : null; render();   // resposta imediata na tela
+    ov.dataset.scrolled = '';
+    apply(() => api('POST', `/api/items/${id}/onair`, { ok }));
+  };
+  const act = (a) => {
+    const K = calc();
+    if (a === 'ok' && K.cur) mark(K.cur.it.id, true);
+    if (a === 'start') apply(() => api('POST', `/api/rundowns/${S.rundown.id}/onair`, { action: 'start' }));
+    if (a === 'end' && confirm('Encerrar o jornal agora?')) apply(() => api('POST', `/api/rundowns/${S.rundown.id}/onair`, { action: 'end' }));
+    if (a === 'reset' && confirm('Zerar todos os OKs de "no ar" deste espelho?')) apply(() => api('POST', `/api/rundowns/${S.rundown.id}/onair`, { action: 'reset' }));
+    if (a === 'close') close();
+  };
+  ov.onclick = (e) => {
+    const t = e.target.closest('[data-tog]'); if (t) { const it = S.rundown.items.find(i => i.id === t.dataset.tog); return mark(it.id, !it.aoArAt); }
+    const b = e.target.closest('[data-oa]'); if (b) act(b.dataset.oa);
+  };
+  const key = (e) => {
+    if (e.target.closest && e.target.closest('input,textarea,select')) return;
+    if (e.key === 'Escape') { e.preventDefault(); close(); }
+    else if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); act('ok'); }
+    else if (e.key === 'Backspace') {
+      e.preventDefault();
+      const last = S.rundown.items.filter(i => i.aoArAt).sort((a, b) => a.aoArAt < b.aoArAt ? 1 : -1)[0];
+      if (last) mark(last.id, false);
+    }
+  };
+  document.addEventListener('keydown', key);
+  const tick = setInterval(render, 1000);
+  const poll = setInterval(async () => {
+    if (busy || !S.rundown) return;
+    try { const f = await api('GET', '/api/rundowns/' + S.rundown.id); if (!busy) { S.rundown = f; renderRundown(); } } catch { }
+  }, 2000);
+  function close() { clearInterval(tick); clearInterval(poll); document.removeEventListener('keydown', key); ov.remove(); renderRundown(); }
+  render();
+}
+
+function prompter() {
+  const rd = S.rundown; if (!rd) return; const C = computeRundown(rd);
+  const parts = C.rows.filter(r => !r.isBreak && !r.dead && (r.it.cabeca || READ_TYPES.includes(r.it.tipo) && r.it.texto));
+  const bg = document.createElement('div');
+  bg.style.cssText = 'position:fixed;inset:0;background:#000;color:#fff;z-index:200;overflow:auto;padding:40px 8vw;font:600 clamp(26px,4.2vw,58px)/1.45 Arial,sans-serif;text-transform:uppercase';
+  bg.innerHTML = `<div style="position:fixed;top:10px;right:16px;font:13px var(--sans);text-transform:none;color:#aaa">Espaço: rolar/pausar · ↑↓ velocidade · Esc: sair</div>` +
+    (parts.length ? parts.map(r => `<div style="color:#e0a526;font-size:.45em;margin-top:1.4em">${r.pagina} · ${esc(r.it.retranca)}</div>
+    <div style="white-space:pre-wrap">${esc(r.it.cabeca).replace(/\[([^\]]*)\]/g, '<span style="color:#6cf;font-size:.6em">[$1]</span>')}${READ_TYPES.includes(r.it.tipo) && r.it.texto ? '\n' + esc(r.it.texto).replace(/\[([^\]]*)\]/g, '<span style="color:#6cf;font-size:.6em">[$1]</span>') : ''}</div>`).join('') : '<p>Sem textos de apresentação.</p>') + '<div style="height:80vh"></div>';
+  document.body.appendChild(bg);
+  let speed = 1.5, run = false, raf;
+  const loop = () => { if (run) { bg.scrollTop += speed; raf = requestAnimationFrame(loop); } };
+  const key = (e) => {
+    if (e.key === 'Escape') { run = false; cancelAnimationFrame(raf); bg.remove(); document.removeEventListener('keydown', key); }
+    if (e.key === ' ') { e.preventDefault(); run = !run; if (run) loop(); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); speed = Math.min(8, speed + .5); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); speed = Math.max(.5, speed - .5); }
+  };
+  document.addEventListener('keydown', key);
+}
+
+// =============================================================== MATÉRIAS (espaço de redação do repórter)
+async function loadMaterias() {
+  const f = S.mf; const q = new URLSearchParams();
+  if (!f.allDates) { q.set('from', f.date); q.set('to', f.date); }
+  if (f.mine) q.set('reporterId', S.me.id);
+  if (f.q) q.set('q', f.q);
+  if (f.comMateria) q.set('comMateria', '1');
+  S.matList = await api('GET', '/api/pautas?' + q);
+}
+async function viewMaterias() {
+  S.mf = Object.assign({ date: today(), allDates: false, mine: S.me.role === 'reporter', q: '', comMateria: false }, S.mf || {});
+  const f = S.mf;
+  $('#main').innerHTML = `
+  <div class="workspace ws-materias">
+    <section class="pane"><div class="pane-h"><h2>Matérias</h2><span class="hint" id="mf-label"></span></div>
+      <div class="pad mf-filters">
+        <div class="datenav"><button class="btn sm" data-d="-1" aria-label="Dia anterior">‹</button><input type="date" id="mf-date" value="${f.date}"><button class="btn sm" data-d="1" aria-label="Próximo dia">›</button><button class="btn sm" id="mf-today">Hoje</button></div>
+        <input type="search" id="mf-q" value="${esc(f.q)}" placeholder="Buscar retranca ou trecho do texto…">
+        <div class="mf-checks">
+          <label class="check"><input type="checkbox" id="mf-all" ${f.allDates ? 'checked' : ''}> Todas as datas</label>
+          <label class="check"><input type="checkbox" id="mf-mine" ${f.mine ? 'checked' : ''}> Só as minhas</label>
+          <label class="check"><input type="checkbox" id="mf-com" ${f.comMateria ? 'checked' : ''}> Já escritas</label>
+        </div>
+      </div>
+      <div class="pane-b" id="mat-list"></div></section>
+    <section class="pane mat-editor" id="mat-editor"></section>
+    <aside class="pane mat-ref" id="mat-ref"></aside>
+  </div>`;
+  const reload = async () => { await loadMaterias(); renderMatList(); };
+  const setDate = (d) => { f.allDates = false; $('#mf-all').checked = false; f.date = d; $('#mf-date').value = d; reload(); };
+  $('#mf-date').onchange = e => setDate(e.target.value || today());
+  $$('.mf-filters [data-d]').forEach(b => b.onclick = () => setDate(addDays(f.date, +b.dataset.d)));
+  $('#mf-today').onclick = () => setDate(today());
+  $('#mf-all').onchange = e => { f.allDates = e.target.checked; reload(); };
+  $('#mf-mine').onchange = e => { f.mine = e.target.checked; reload(); };
+  $('#mf-com').onchange = e => { f.comMateria = e.target.checked; reload(); };
+  let qt; $('#mf-q').oninput = e => { clearTimeout(qt); qt = setTimeout(() => { f.q = e.target.value.trim(); reload(); }, 300); };
+  $('#mat-list').onclick = e => { const r = e.target.closest('[data-id]'); if (r) openMateria(r.dataset.id); };
+  await reload();
+  const want = S.matOpenId || (S.mat && S.mat.id); S.matOpenId = null;
+  if (want) await openMateria(want, true); else renderMatEditor();
+  S.pollTimer = setInterval(async () => { if (S.view !== 'materias') return; try { await loadMaterias(); renderMatList(); } catch { } }, 10000);
+}
+function renderMatList() {
+  const el = $('#mat-list'); if (!el) return;
+  $('#mf-label').textContent = S.mf.allDates ? 'todas as datas' : `${weekday(S.mf.date)}, ${fmtDate(S.mf.date)}`;
+  const L = S.matList || [];
+  if (!L.length) { el.innerHTML = `<div class="empty">Nenhuma pauta ${S.mf.mine ? 'sua ' : ''}para este filtro.${S.mf.mine ? '<br><br><span class="hint">Desmarque “Só as minhas” para ver todas.</span>' : ''}</div>`; return; }
+  const selId = S.mat && S.mat.id;
+  el.innerHTML = L.map(p => {
+    const w = wordCount(p.materia);
+    return `<div class="matrow ${p.id === selId ? 'sel' : ''}" data-id="${p.id}">
+      <div class="mr-top"><span class="retr">${esc(p.retranca)}</span>${p.lock && !p.lock.mine ? ` <span title="Em edição por ${esc(p.lock.name)}">🔒</span>` : ''}<span class="grow"></span>${materiaPill(p)}</div>
+      <div class="mr-sub">${S.mf.allDates ? fmtDate(p.data) + ' · ' : ''}${esc(repName(p) || 'sem repórter')} · <span class="tipo">${esc(p.formato || '')}</span>${w ? ` · ${w} pal. · ~${fmtDur(Math.round(w * 60 / 170))}` : ''}</div>
+    </div>`;
+  }).join('');
+}
+async function openMateria(id, silent) {
+  if (S.matDirty && !(await saveMateria())) { if (!confirm('Não foi possível salvar a matéria atual. Trocar mesmo assim?')) return; }
+  S.matDirty = false; clearTimeout(S.matTimer); await releaseLocks();
+  try { S.mat = await api('GET', '/api/pautas/' + id); }
+  catch (e) { S.mat = null; if (!silent) toast(e.message, true); }
+  renderMatList(); renderMatEditor();
+}
+function renderMatEditor() {
+  const el = $('#mat-editor'), ref = $('#mat-ref'); if (!el) return;
+  const p = S.mat;
+  if (!p) {
+    el.innerHTML = `<div class="pane-h"><h2>Texto da matéria</h2></div><div class="empty">Escolha uma pauta na lista para escrever a matéria.<br><br><span class="hint">O texto fica salvo junto com a pauta e qualquer pessoa da redação pode encontrá-lo em Busca.</span></div>`;
+    ref.innerHTML = `<div class="pane-h"><h2>Pauta</h2></div><div class="empty hint">A proposta, a marcação e as informações da pauta aparecem aqui enquanto você escreve.</div>`;
+    return;
+  }
+  const lockedBy = p.lock && !p.lock.mine ? p.lock.name : null;
+  const ro = lockedBy ? 'disabled' : '';
+  const prog = p.programaId ? (S.programs.find(x => x.id === p.programaId) || {}).name || '' : '';
+  el.innerHTML = `
+    <div class="pane-h"><h2>Matéria</h2><span class="savestate" id="mstate">Salva</span><div style="flex:1"></div>
+      <button class="btn primary sm" id="m-save" ${ro}>Salvar</button>
+      <button class="btn sm" id="m-print">Imprimir / PDF</button>
+      <button class="btn sm" id="m-pauta">Abrir pauta</button></div>
+    ${lockedBy ? `<div class="banner">🔒 Em edição por <b>${esc(lockedBy)}</b>. Você está vendo em modo leitura.</div>` : ''}
+    <div class="mat-head">
+      <div class="mat-retr">${esc(p.retranca)}</div>
+      <div class="hint">${p.data ? `${esc(weekday(p.data))}, ${fmtDate(p.data)}` : ''}${prog ? ' · ' + esc(prog) : ''} · ${esc(p.formato || '')} · Repórter: <b>${esc(repName(p) || '—')}</b></div>
+    </div>
+    <div class="mat-tools">
+      ${['OFF', 'SONORA', 'PASSAGEM', 'ARTE', 'GC', 'TRILHA', 'IMAGEM'].map(t => `<button class="btn sm" data-ins="${t}" ${ro}>[${t}]</button>`).join('')}
+      <div style="flex:1"></div>
+      <label class="lbl" for="m-st">Situação</label>
+      <select id="m-st" style="width:auto" ${ro}>${opts(MATERIA_STATUS, p.materiaStatus || '')}</select>
+    </div>
+    <textarea class="materia mat-text" id="m-text" spellcheck="true" ${ro} placeholder="Escreva aqui a sua matéria.&#10;&#10;[OFF]&#10;Texto narrado sobre as imagens…&#10;&#10;[SONORA] NOME / CARGO&#10;&quot;Fala do entrevistado…&quot;&#10;&#10;[PASSAGEM] NOME DO REPÓRTER&#10;Texto da passagem…">${esc(p.materia || '')}</textarea>
+    <div class="mat-foot"><span class="readtime" id="m-rt">${materiaStats(p.materia) || '0 palavras'}</span><span class="grow"></span>
+      <span class="hint" id="m-meta">${p.materiaAutorId ? `Última edição: <b>${esc(userName(p.materiaAutorId))}</b> em ${fmtDT(p.materiaAt)}` : 'Salvamento automático enquanto você escreve · Ctrl+S salva na hora'}</span></div>`;
+
+  const ents = (p.entrevistados || []).filter(e => e.nome);
+  const blk = (t, v) => String(v || '').trim() ? `<div class="ref-b"><div class="ref-t">${t}</div><div class="ref-x">${esc(v)}</div></div>` : '';
+  ref.innerHTML = `<div class="pane-h"><h2>Pauta</h2><span class="hint">consulta</span></div><div class="pane-b pad">
+    ${blk('Proposta', p.proposta)}
+    ${ents.length || p.local ? `<div class="ref-b"><div class="ref-t">Marcação</div>${ents.map(e => `<div class="ref-ent"><b>${esc(e.nome)}</b>${e.funcao ? ' · ' + esc(e.funcao) : ''}<div class="hint">${[fmtDate(e.data), e.horario, e.local].filter(Boolean).map(esc).join(' · ')}${e.confirmado ? ' · ✓ confirmado' : ''}</div></div>`).join('')}
+      ${p.local ? `<div class="hint" style="margin-top:4px">Local: ${esc(p.local)}${p.endereco ? ' — ' + esc(p.endereco) : ''}</div>` : ''}</div>` : ''}
+    ${blk('Informações', p.historico)}${blk('Encaminhamento', p.encaminhamento)}${blk('Sugestão de perguntas', p.perguntas)}
+    ${!p.proposta && !p.historico && !ents.length ? '<div class="hint">Pauta sem detalhes preenchidos.</div>' : ''}
+  </div>`;
+
+  const ta = $('#m-text');
+  const dirty = async () => {
+    const st = $('#mstate'); if (st) { st.textContent = 'Alterações não salvas'; st.classList.add('dirty'); }
+    if (!S.matDirty) { S.matDirty = true; const r = await acquireLock('p:' + p.id); if (!r.ok) toast(`Pauta em edição por ${r.lock.name}.`, true); }
+    clearTimeout(S.matTimer); S.matTimer = setTimeout(() => saveMateria(), 3000);
+  };
+  ta.oninput = () => {
+    p.materia = ta.value; $('#m-rt').textContent = materiaStats(p.materia) || '0 palavras';
+    if (p.materia.trim() && !p.materiaStatus) { p.materiaStatus = 'rascunho'; $('#m-st').value = 'rascunho'; }
+    dirty();
+  };
+  $('#m-st').onchange = (e) => { p.materiaStatus = e.target.value; dirty(); };
+  $$('#mat-editor [data-ins]').forEach(b => b.onclick = () => {
+    const s = ta.selectionStart, before = ta.value.slice(0, s), t = b.dataset.ins;
+    const ins = (before && !before.endsWith('\n') ? '\n\n' : '') + `[${t}] ` + (['SONORA', 'PASSAGEM', 'GC'].includes(t) ? 'NOME / CARGO\n' : '');
+    ta.setRangeText(ins, s, ta.selectionEnd, 'end'); ta.focus(); ta.oninput();
+  });
+  $('#m-save').onclick = () => saveMateria(true);
+  $('#m-print').onclick = async () => { if (S.matDirty) await saveMateria(); printPauta(S.mat); };
+  $('#m-pauta').onclick = async () => { const id = p.id; S.pf.date = p.data; S.pf.allDates = false; await go('pautas'); if (S.view === 'pautas') openPauta(id); };
+}
+async function saveMateria(showToast) {
+  const p = S.mat; if (!p) return true;
+  clearTimeout(S.matTimer);
+  if (!S.matDirty) { if (showToast) toast('Matéria salva.'); return true; }
+  const st = $('#mstate'); if (st) st.textContent = 'Salvando…';
+  try {
+    const saved = await api('PUT', '/api/pautas/' + p.id, { materia: p.materia || '', materiaStatus: p.materiaStatus || '', updatedAt: p.updatedAt, force: p.force });
+    delete p.force;
+    Object.assign(p, { updatedAt: saved.updatedAt, materiaAutorId: saved.materiaAutorId, materiaAt: saved.materiaAt });
+    S.matDirty = false;
+    if (st) { st.textContent = 'Salva'; st.classList.remove('dirty'); }
+    const m = $('#m-meta'); if (m && p.materiaAutorId) m.innerHTML = `Última edição: <b>${esc(userName(p.materiaAutorId))}</b> em ${fmtDT(p.materiaAt)}`;
+    const li = (S.matList || []).find(x => x.id === p.id); if (li) { li.materia = p.materia; li.materiaStatus = p.materiaStatus; renderMatList(); }
+    if (showToast) toast('Matéria salva.');
+    return true;
+  } catch (e) {
+    if (st) st.textContent = 'Não salva';
+    if (e.status === 409 && confirm(e.message + '\n\nSobrescrever com o seu texto?')) { p.force = true; return saveMateria(showToast); }
+    toast(e.message, true); return false;
+  }
+}
+
+// =============================================================== BUSCA (pautas + matérias)
+const fold = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+// destaca os termos (sem diferenciar acentos) devolvendo HTML seguro
+function highlight(text, terms) {
+  text = String(text || '').normalize('NFC');
+  const f = fold(text); const ranges = [];
+  terms.forEach(t => { let i = 0; while (t && (i = f.indexOf(t, i)) >= 0) { ranges.push([i, i + t.length]); i += t.length; } });
+  if (!ranges.length) return esc(text);
+  ranges.sort((a, b) => a[0] - b[0]);
+  const merged = [ranges[0]]; ranges.slice(1).forEach(r => { const l = merged[merged.length - 1]; if (r[0] <= l[1]) l[1] = Math.max(l[1], r[1]); else merged.push(r); });
+  let out = '', pos = 0;
+  merged.forEach(([a, b]) => { out += esc(text.slice(pos, a)) + '<mark>' + esc(text.slice(a, b)) + '</mark>'; pos = b; });
+  return out + esc(text.slice(pos));
+}
+function snippet(p, terms) {
+  const ents = (p.entrevistados || []).map(e => [e.nome, e.funcao, e.local].filter(Boolean).join(' — ')).join(' · ');
+  const fields = [['Matéria', p.materia], ['Proposta', p.proposta], ['Informações', p.historico], ['Marcação', ents], ['Encaminhamento', p.encaminhamento], ['Perguntas', p.perguntas], ['Observações', p.observacoes]];
+  let hit = terms.length ? fields.find(([, v]) => terms.some(t => fold(v).includes(t))) : null;
+  if (!hit) hit = fields.find(([, v]) => String(v || '').trim()) || ['', ''];
+  const [lbl, val] = hit; const txt = String(val || '').normalize('NFC').replace(/\s+/g, ' ');
+  let start = 0;
+  if (terms.length) { const i = Math.min(...terms.map(t => { const k = fold(txt).indexOf(t); return k < 0 ? Infinity : k; })); if (isFinite(i)) start = Math.max(0, i - 90); }
+  const piece = (start ? '…' : '') + txt.slice(start, start + 260) + (txt.length > start + 260 ? '…' : '');
+  return lbl ? `<span class="snip-l">${lbl}</span> ${highlight(piece, terms)}` : '';
+}
+async function viewBusca() {
+  S.bq = S.bq || { q: '', from: '', to: '', status: '', reporterId: '', comMateria: false };
+  const B = S.bq;
+  $('#main').innerHTML = `<div class="page buscapage">
+    <h1>Busca de pautas e matérias</h1>
+    <form id="bform" class="searchbar">
+      <input type="search" id="bq" value="${esc(B.q)}" placeholder="Digite palavras: retranca, assunto, entrevistado, local, trecho da matéria…" autocomplete="off">
+      <button class="btn primary">Buscar</button>
+    </form>
+    <div class="formbar bfilters">
+      <label class="lbl">De</label><input type="date" id="b-from" value="${B.from}" style="width:auto">
+      <label class="lbl">Até</label><input type="date" id="b-to" value="${B.to}" style="width:auto">
+      <select id="b-status" style="width:auto"><option value="">Qualquer status</option>${opts(PAUTA_STATUS, B.status)}</select>
+      <select id="b-rep" style="width:auto"><option value="">Qualquer repórter</option>${opts(S.users.map(u => [u.id, u.name]), B.reporterId)}</select>
+      <label class="check"><input type="checkbox" id="b-mat" ${B.comMateria ? 'checked' : ''}> Só com matéria escrita</label>
+      <button class="btn sm" id="b-clear" type="button">Limpar</button>
+    </div>
+    <div id="bres"><div class="empty">Buscando…</div></div>
+  </div>`;
+  const run = async () => {
+    const q = new URLSearchParams();
+    if (B.q) q.set('q', B.q); if (B.from) q.set('from', B.from); if (B.to) q.set('to', B.to);
+    if (B.status) q.set('status', B.status); if (B.reporterId) q.set('reporterId', B.reporterId);
+    const recent = !B.q && !B.from && !B.to && !B.status && !B.reporterId;
+    if (B.comMateria || recent) q.set('comMateria', '1');
+    let list = [];
+    try { list = await api('GET', '/api/pautas?' + q); } catch (e) { return toast(e.message, true); }
+    const terms = fold(B.q).split(/\s+/).filter(Boolean);
+    const el = $('#bres'); if (!el) return;
+    const shown = list.slice(0, 200);
+    el.innerHTML = `<div class="hint" style="margin:4px 0 10px">${recent ? 'Matérias escritas mais recentes' : `${list.length} resultado(s)`}${list.length > 200 ? ' · mostrando os 200 mais recentes' : ''}</div>` +
+      (shown.length ? shown.map(p => `<article class="result" data-id="${p.id}" tabindex="0">
+        <div class="r-h"><span class="retr">${highlight(p.retranca, terms)}</span>
+          <span class="mono hint">${fmtDate(p.data)}</span>
+          <span class="pill st-${p.status}">${esc(label(PAUTA_STATUS, p.status))}</span>
+          ${materiaPill(p)}
+          <span class="hint">${esc(p.editoria || '')}${p.reporterId ? ' · Repórter: ' + esc(repName(p)) : ''}${p.produtorId ? ' · Produção: ' + esc(userName(p.produtorId)) : ''}</span></div>
+        <div class="r-s">${snippet(p, terms)}</div>
+      </article>`).join('') : '<div class="empty">Nada encontrado. Tente outras palavras ou amplie as datas.</div>');
+  };
+  $('#bform').onsubmit = (e) => { e.preventDefault(); B.q = $('#bq').value.trim(); run(); };
+  let t; $('#bq').oninput = (e) => { clearTimeout(t); t = setTimeout(() => { B.q = e.target.value.trim(); run(); }, 350); };
+  $('#b-from').onchange = (e) => { B.from = e.target.value; run(); };
+  $('#b-to').onchange = (e) => { B.to = e.target.value; run(); };
+  $('#b-status').onchange = (e) => { B.status = e.target.value; run(); };
+  $('#b-rep').onchange = (e) => { B.reporterId = e.target.value; run(); };
+  $('#b-mat').onchange = (e) => { B.comMateria = e.target.checked; run(); };
+  $('#b-clear').onclick = () => { S.bq = null; viewBusca(); };
+  const open = (e) => { const r = e.target.closest('.result'); if (r) showPautaReadOnly(r.dataset.id); };
+  $('#bres').onclick = open;
+  $('#bres').onkeydown = (e) => { if (e.key === 'Enter') open(e); };
+  $('#bq').focus();
+  await run();
+}
+
+// =============================================================== CALENDÁRIO
+const MESES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+const monthRange = (ym) => { const [y, m] = ym.split('-').map(Number); const last = new Date(y, m, 0).getDate(); return [`${ym}-01`, `${ym}-${String(last).padStart(2, '0')}`]; };
+const shiftMonth = (ym, n) => { const [y, m] = ym.split('-').map(Number); const d = new Date(y, m - 1 + n, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+// grade mensal começando no domingo; cell(iso, inMonth) devolve o HTML da célula
+function monthGrid(ym, cell, cls = '') {
+  const [y, m] = ym.split('-').map(Number);
+  const first = new Date(y, m - 1, 1); const startDow = first.getDay();
+  const days = []; for (let i = 0; i < 42; i++) { const d = new Date(y, m - 1, 1 - startDow + i); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); days.push(d.toISOString().slice(0, 10)); }
+  const weeks = days[35].slice(0, 7) === ym ? 6 : 5;
+  return `<div class="cal ${cls}">${['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map(d => `<div class="cal-dow">${cls.includes('mini') ? d[0] : d}</div>`).join('')}
+    ${days.slice(0, weeks * 7).map(iso => cell(iso, iso.slice(0, 7) === ym)).join('')}</div>`;
+}
+async function renderMiniCal() {
+  const el = $('#minical'); if (!el) return;
+  const ym = S.calYm || S.pf.date.slice(0, 7); S.calYm = ym;
+  const [from, to] = monthRange(ym);
+  let counts = {};
+  try { (await api('GET', `/api/pautas?from=${from}&to=${to}`)).forEach(p => { counts[p.data] = (counts[p.data] || 0) + 1; }); } catch { }
+  el.innerHTML = `<div class="cal-h"><button class="btn sm" data-cm="-1" aria-label="Mês anterior">‹</button><b>${MESES[+ym.slice(5) - 1]} ${ym.slice(0, 4)}</b><button class="btn sm" data-cm="1" aria-label="Próximo mês">›</button></div>` +
+    monthGrid(ym, (iso, inM) => `<button class="cal-d ${inM ? '' : 'out'} ${iso === today() ? 'today' : ''} ${!S.pf.allDates && iso === S.pf.date ? 'on' : ''}" data-day="${iso}" title="${counts[iso] || 0} pauta(s)">${+iso.slice(8)}${counts[iso] ? `<i>${counts[iso]}</i>` : ''}</button>`, 'mini');
+  el.onclick = async (e) => {
+    const cm = e.target.closest('[data-cm]'); if (cm) { S.calYm = shiftMonth(ym, +cm.dataset.cm); return renderMiniCal(); }
+    const d = e.target.closest('[data-day]'); if (!d) return;
+    S.pf.date = d.dataset.day; S.pf.allDates = false; const all = $('#pf-all'); if (all) all.checked = false;
+    const di = $('#pf-date'); if (di) di.value = S.pf.date;
+    S.calYm = S.pf.date.slice(0, 7);
+    await loadPautas(); renderPautaList(); renderMiniCal();
+  };
+}
+async function viewCalendario() {
+  S.bigYm = S.bigYm || today().slice(0, 7);
+  const ym = S.bigYm; const [from, to] = monthRange(ym);
+  const [f2, t2] = [addDays(from, -7), addDays(to, 14)];
+  let list = [];
+  try { list = await api('GET', `/api/pautas?from=${f2}&to=${t2}`); } catch (e) { toast(e.message, true); }
+  const filt = S.calFilter || '';
+  if (filt) list = list.filter(p => p.programaId === filt);
+  const byDay = {}; list.forEach(p => (byDay[p.data] = byDay[p.data] || []).push(p));
+  const total = list.filter(p => p.data.slice(0, 7) === ym).length;
+  $('#main').innerHTML = `<div class="page calpage">
+    <div class="formbar" style="margin-bottom:12px">
+      <button class="btn" data-cm="-1" aria-label="Mês anterior">‹</button>
+      <h1 style="margin:0;min-width:200px;text-align:center">${MESES[+ym.slice(5) - 1]} ${ym.slice(0, 4)}</h1>
+      <button class="btn" data-cm="1" aria-label="Próximo mês">›</button>
+      <button class="btn" data-cm="0">Hoje</button>
+      <select id="cal-prog" style="width:auto"><option value="">Todos os telejornais</option>${opts(S.programs.map(p => [p.id, p.name]), filt)}</select>
+      <span class="hint">${total} pauta(s) no mês</span>
+      <div style="flex:1"></div>
+      <span class="legend">${PAUTA_STATUS.map(([k, l]) => `<span class="pill st-${k}">${l}</span>`).join(' ')}</span>
+    </div>
+    ${monthGrid(ym, (iso, inM) => {
+      const ps = byDay[iso] || [];
+      return `<div class="cal-cell ${inM ? '' : 'out'} ${iso === today() ? 'today' : ''}" data-day="${iso}">
+        <div class="cal-top"><button class="cal-num" data-open-day="${iso}" title="Ver pautas do dia">${+iso.slice(8)}</button><button class="cal-add" data-new="${iso}" title="Nova pauta neste dia" aria-label="Nova pauta em ${fmtDate(iso)}">+</button></div>
+        ${ps.slice(0, 5).map(p => `<button class="cal-ev st-${p.status}" data-pid="${p.id}" data-pday="${p.data}" title="${esc(p.retranca)} — ${esc(label(PAUTA_STATUS, p.status))}${p.horario ? ' · ' + esc(p.horario) : ''}">${p.horario ? `<span class="mono">${esc(p.horario)}</span> ` : ''}${esc(p.retranca)}</button>`).join('')}
+        ${ps.length > 5 ? `<button class="cal-more" data-open-day="${iso}">+${ps.length - 5} pauta(s)</button>` : ''}
+      </div>`;
+    }, 'big')}
+  </div>`;
+  const main = $('#main');
+  $('#cal-prog').onchange = (e) => { S.calFilter = e.target.value; viewCalendario(); };
+  main.onclick = async (e) => {
+    const cm = e.target.closest('[data-cm]');
+    if (cm) { S.bigYm = cm.dataset.cm === '0' ? today().slice(0, 7) : shiftMonth(ym, +cm.dataset.cm); return viewCalendario(); }
+    const nw = e.target.closest('[data-new]');
+    if (nw) { S.pf.date = nw.dataset.new; S.pf.allDates = false; S.calYm = S.pf.date.slice(0, 7); await go('pautas'); return openPauta(null); }
+    const ev = e.target.closest('[data-pid]');
+    if (ev) { S.pf.date = ev.dataset.pday; S.pf.allDates = false; S.calYm = S.pf.date.slice(0, 7); await go('pautas'); return openPauta(ev.dataset.pid); }
+    const od = e.target.closest('[data-open-day]');
+    if (od) { S.pf.date = od.dataset.openDay; S.pf.allDates = false; S.calYm = S.pf.date.slice(0, 7); return go('pautas'); }
+  };
+}
+
+// =============================================================== TELEJORNAIS
+async function viewProgramas() {
+  S.programs = await api('GET', '/api/programs');
+  const canEdit = S.perms.managePrograms;
+  $('#main').innerHTML = `<div class="page"><h1>Telejornais</h1>
+    <p class="hint">Horário de início, duração prevista (incluindo intervalos) e velocidade de leitura usada para calcular o tempo das cabeças.</p>
+    <div class="card"><table class="grid"><thead><tr><th>Nome</th><th>Sigla</th><th>Início</th><th>Duração</th><th>Palavras/min</th><th>Apresentadores (vírgula)</th><th>Ativo</th><th></th></tr></thead><tbody>
+    ${S.programs.map(p => `<tr data-id="${p.id}">
+      <td><input type="text" data-k="name" value="${esc(p.name)}" ${canEdit ? '' : 'disabled'}></td>
+      <td style="width:80px"><input type="text" data-k="sigla" value="${esc(p.sigla)}" ${canEdit ? '' : 'disabled'}></td>
+      <td style="width:110px"><input type="text" class="mono" data-k="inicio" value="${esc(p.inicio)}" placeholder="hh:mm:ss" ${canEdit ? '' : 'disabled'}></td>
+      <td style="width:110px"><input type="text" class="mono" data-k="duracao" value="${esc(p.duracao)}" placeholder="hh:mm:ss" ${canEdit ? '' : 'disabled'}></td>
+      <td style="width:90px"><input type="number" data-k="wpm" value="${esc(p.wpm)}" min="80" max="300" ${canEdit ? '' : 'disabled'}></td>
+      <td><input type="text" data-k="apresentadores" value="${esc(p.apresentadores)}" ${canEdit ? '' : 'disabled'}></td>
+      <td><input type="checkbox" data-k="ativo" ${p.ativo !== false ? 'checked' : ''} ${canEdit ? '' : 'disabled'}></td>
+      <td style="white-space:nowrap">${canEdit ? '<button class="btn sm primary" data-save>Salvar</button> <button class="btn sm danger" data-del title="Excluir telejornal">Excluir</button>' : ''}</td></tr>`).join('')}
+    </tbody></table></div>
+    ${canEdit ? `<div class="card"><div class="pad"><h3 style="margin-top:0">Novo telejornal</h3><form id="np" class="row4">
+      <div class="field"><label>Nome</label><input type="text" name="name" required></div>
+      <div class="field"><label>Sigla</label><input type="text" name="sigla"></div>
+      <div class="field"><label>Início</label><input type="text" class="mono" name="inicio" value="12:00:00"></div>
+      <div class="field"><label>Duração</label><input type="text" class="mono" name="duracao" value="00:30:00"></div>
+      <div><button class="btn primary">Adicionar</button></div></form></div></div>` : ''}
+  </div>`;
+  $('#main').onclick = async (e) => {
+    const d = e.target.closest('[data-del]');
+    if (d) {
+      const id = d.closest('tr').dataset.id; const pg = S.programs.find(x => x.id === id); if (!pg) return;
+      if (!confirm(`Excluir o telejornal ${pg.name}?\n\nTodos os espelhos dele (de todas as datas) serão apagados e não poderão ser recuperados. As pautas continuam no sistema, só ficam sem telejornal de destino.\n\nSe quiser apenas tirar o jornal do ar, desmarque "Ativo" em vez de excluir.`)) return;
+      try {
+        await api('DELETE', '/api/programs/' + id);
+        if (S.rd.programId === id) S.rd.programId = '';
+        S.programs = await api('GET', '/api/programs');
+        if (!S.rd.programId && S.programs.length) S.rd.programId = S.programs[0].id;
+        toast('Telejornal excluído.'); viewProgramas();
+      } catch (er) { toast(er.message, true); }
+      return;
+    }
+    const b = e.target.closest('[data-save]'); if (!b) return;
+    const tr = b.closest('tr'); const body = {};
+    $$('[data-k]', tr).forEach(i => { body[i.dataset.k] = i.type === 'checkbox' ? i.checked : i.value; });
+    try { await api('PUT', '/api/programs/' + tr.dataset.id, body); S.programs = await api('GET', '/api/programs'); toast('Telejornal salvo.'); } catch (er) { toast(er.message, true); }
+  };
+  const np = $('#np'); if (np) np.onsubmit = async (e) => { e.preventDefault(); try { await api('POST', '/api/programs', Object.fromEntries(new FormData(e.target))); toast('Telejornal criado.'); viewProgramas(); } catch (er) { toast(er.message, true); } };
+}
+
+// =============================================================== EQUIPE
+// lê o logotipo e reduz imagens grandes para no máximo 900 px (fica leve no banco)
+function readLogo(file) {
+  return new Promise((ok, ko) => {
+    if (!/^image\/(png|jpeg|webp|svg\+xml)$/.test(file.type)) return ko(new Error('Use um arquivo PNG, JPG, WEBP ou SVG.'));
+    const fr = new FileReader();
+    fr.onerror = () => ko(new Error('Não foi possível ler o arquivo.'));
+    fr.onload = () => {
+      const url = fr.result;
+      if (file.type === 'image/svg+xml') return url.length > 600000 ? ko(new Error('SVG muito grande.')) : ok(url);
+      const img = new Image();
+      img.onerror = () => ko(new Error('Imagem inválida.'));
+      img.onload = () => {
+        const k = Math.min(1, 900 / Math.max(img.width, img.height));
+        const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        let out = c.toDataURL('image/png');
+        if (out.length > 850000) out = c.toDataURL('image/webp', 0.9);
+        out.length > 850000 ? ko(new Error('Imagem muito grande.')) : ok(out);
+      };
+      img.src = url;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+async function viewEquipe() {
+  S.users = await api('GET', '/api/users');
+  const adm = S.perms.manageUsers;
+  const invites = SUPA_MODE && adm ? await api('GET', '/api/invites') : [];
+  $('#main').innerHTML = `<div class="page"><h1>Equipe</h1>
+    <div class="card"><table class="grid"><thead><tr><th>Nome</th><th>E-mail</th><th>Função</th><th>Situação</th><th>Desde</th>${adm ? '<th></th>' : ''}</tr></thead><tbody>
+    ${S.users.map(u => `<tr data-id="${u.id}"><td><b>${esc(u.name)}</b></td><td>${esc(u.email)}</td>
+      <td>${adm ? `<select data-role style="width:auto">${opts(S.roles.map(r => [r.id, r.label]), u.role)}</select>` : esc(u.roleLabel)}</td>
+      <td>${u.active ? '<span class="pill st-gravada">Ativo</span>' : '<span class="pill st-caiu">Inativo</span>'}</td><td>${fmtDT(u.createdAt)}</td>
+      ${adm ? `<td><button class="btn sm" data-toggle>${u.active ? 'Desativar' : 'Reativar'}</button>${SUPA_MODE ? '' : ' <button class="btn sm" data-reset>Nova senha</button>'}</td>` : ''}</tr>`).join('')}
+    </tbody></table></div>
+    ${adm && invites.length ? `<div class="card"><div class="pad"><h3 style="margin-top:0">Convites pendentes</h3>
+      <table class="grid"><thead><tr><th>E-mail</th><th>Nome</th><th>Função</th><th>Enviado</th><th></th></tr></thead><tbody>
+      ${invites.map(i => `<tr data-inv="${i.id}"><td>${esc(i.email)}</td><td>${esc(i.name)}</td><td>${esc((S.roles.find(r => r.id === i.role) || {}).label || i.role)}</td><td>${fmtDT(i.createdAt)}</td><td><button class="btn sm danger" data-invdel>Cancelar</button></td></tr>`).join('')}
+      </tbody></table></div></div>` : ''}
+    ${adm ? `<div class="card"><div class="pad"><h3 style="margin-top:0">${SUPA_MODE ? 'Convidar membro da equipe' : 'Adicionar membro da equipe'}</h3>
+      ${SUPA_MODE ? '<p class="hint" style="margin-top:0">A pessoa entra em “Criar conta” com este e-mail e cai direto na sua redação, com a função escolhida.</p>' : ''}
+      <form id="nu" class="row4" autocomplete="off">
+        <div class="field"><label>Nome</label><input type="text" name="name" required></div>
+        <div class="field"><label>E-mail</label><input type="email" name="email" required></div>
+        ${SUPA_MODE ? '' : '<div class="field"><label>Senha inicial (mín. 8)</label><input type="password" name="password" required minlength="8" autocomplete="new-password"></div>'}
+        <div class="field"><label>Função</label><select name="role">${opts(S.roles.map(r => [r.id, r.label]), 'reporter')}</select></div>
+        <div><button class="btn primary">Adicionar</button></div>
+      </form>
+      <p class="hint">Permissões: <b>Administrador</b> gerencia equipe e tudo mais · <b>Chefe de reportagem</b> e <b>Editor</b> fecham e aprovam espelhos · <b>Produtor</b> cria e exclui pautas · <b>Repórter</b> e <b>Apresentador</b> editam pautas e laudas.</p>
+    </div></div>` : ''}
+    ${S.perms.managePrograms ? `<div class="card"><div class="pad"><h3 style="margin-top:0">Equipe técnica</h3>
+      <p class="hint" style="margin-top:0">Nomes sugeridos nos campos <b>Cinegrafista</b> e <b>Motorista</b> da pauta. Um nome por linha. Na pauta também dá para digitar um nome que não está na lista. Os repórteres sugeridos vêm da tabela acima.</p>
+      <div class="row2">
+        <div class="field"><label>Repórteres cinematográficos</label><textarea id="eq-cine" rows="6" placeholder="João Batista&#10;Marcos Lima">${esc((S.org.cinegrafistas || []).join('\n'))}</textarea></div>
+        <div class="field"><label>Motoristas</label><textarea id="eq-mot" rows="6" placeholder="Carlos Souza&#10;Pedro Alves">${esc((S.org.motoristas || []).join('\n'))}</textarea></div>
+      </div>
+      <button class="btn primary" id="eq-save" type="button">Salvar equipe técnica</button>
+    </div></div>` : ''}
+    ${adm ? `<div class="card"><div class="pad"><h3 style="margin-top:0">Identidade da emissora</h3>
+      <p class="hint" style="margin-top:0">Logotipo, cor e rodapé usados na impressão e no PDF de pautas e matérias.</p>
+      <div class="brandset">
+        <div class="brand-prev" id="br-prev"></div>
+        <div class="brand-fields">
+          <div class="field"><label>Nome da emissora</label><input type="text" id="br-name" value="${esc(S.org.name)}" maxlength="80"></div>
+          <div class="field"><label>Logotipo (PNG, JPG, WEBP ou SVG)</label>
+            <div class="formbar"><input type="file" id="br-file" accept="image/png,image/jpeg,image/webp,image/svg+xml"><button class="btn sm danger" id="br-rm" type="button">Remover logotipo</button></div></div>
+          <div class="row2">
+            <div class="field"><label>Cor do layout</label><input type="color" id="br-color" value="${esc(S.org.printColor || '#0b3566')}" style="height:34px;padding:2px"></div>
+            <div class="field"><label>Rodapé (endereço, site, telefone)</label><input type="text" id="br-foot" value="${esc(S.org.printFooter || '')}" maxlength="200" placeholder="Ex.: Rua das Flores, 100 · ftvtec.com.br"></div>
+          </div>
+          <div class="formbar"><button class="btn primary" id="br-save" type="button">Salvar identidade</button><span class="hint">Veja o resultado em Pautas → Imprimir ou em Matérias → Imprimir / PDF.</span></div>
+        </div>
+      </div></div></div>` : ''}</div>`;
+  const eqs = $('#eq-save'); if (eqs) eqs.onclick = async () => {
+    const lines = (id) => $(id).value.split('\n').map(s => s.trim()).filter(Boolean);
+    try { S.org = Object.assign(S.org, await api('PUT', '/api/org/equipe', { cinegrafistas: lines('#eq-cine'), motoristas: lines('#eq-mot') })); toast('Equipe técnica salva.'); }
+    catch (er) { toast(er.message, true); }
+  };
+  if (!adm) return;
+  // identidade visual
+  let brLogo = S.org.logo || '';
+  const brPrev = () => {
+    const c = $('#br-color').value;
+    $('#br-prev').innerHTML = `<div class="bp-h" style="border-color:${esc(c)}"><div class="bp-logo">${brLogo ? `<img src="${esc(brLogo)}" alt="Logotipo">` : `<b>${esc($('#br-name').value)}</b>`}</div>
+      <div class="bp-t"><div style="color:${esc(c)}">PAUTA</div><b>RETRANCA DA MATÉRIA</b></div></div><div class="bp-l"></div><div class="bp-l s"></div><div class="bp-l"></div>`;
+  };
+  brPrev();
+  $('#br-color').oninput = brPrev; $('#br-name').oninput = brPrev;
+  $('#br-rm').onclick = () => { brLogo = ''; $('#br-file').value = ''; brPrev(); };
+  $('#br-file').onchange = async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    try { brLogo = await readLogo(file); brPrev(); } catch (er) { toast(er.message, true); e.target.value = ''; }
+  };
+  $('#br-save').onclick = async () => {
+    try {
+      S.org = Object.assign(S.org, await api('PUT', '/api/org', { name: $('#br-name').value, logo: brLogo, printColor: $('#br-color').value, printFooter: $('#br-foot').value }));
+      $('.topbar .org').textContent = S.org.name; toast('Identidade da emissora salva.');
+    } catch (er) { toast(er.message, true); }
+  };
+  $('#nu').onsubmit = async (e) => { e.preventDefault(); try { await api('POST', '/api/users', Object.fromEntries(new FormData(e.target))); toast(SUPA_MODE ? 'Convite registrado.' : 'Usuário criado.'); viewEquipe(); } catch (er) { toast(er.message, true); } };
+  $$('[data-invdel]').forEach(b => b.onclick = async () => { try { await api('DELETE', '/api/invites/' + b.closest('tr').dataset.inv); viewEquipe(); } catch (er) { toast(er.message, true); } });
+  $('#main').onchange = async (e) => { if (!e.target.matches('[data-role]')) return; const id = e.target.closest('tr').dataset.id;
+    try { await api('PUT', '/api/users/' + id, { role: e.target.value }); toast('Função alterada.'); } catch (er) { toast(er.message, true); viewEquipe(); } };
+  $('#main').onclick = async (e) => {
+    const tr = e.target.closest('tr[data-id]'); if (!tr) return; const u = S.users.find(x => x.id === tr.dataset.id);
+    if (e.target.matches('[data-toggle]')) { try { await api('PUT', '/api/users/' + u.id, { active: !u.active }); viewEquipe(); } catch (er) { toast(er.message, true); } }
+    if (e.target.matches('[data-reset]')) {
+      const md = modal('Definir nova senha — ' + u.name, `<form id="rp"><div class="field"><label>Nova senha (mín. 8)</label><input type="password" name="password" minlength="8" required autocomplete="new-password"></div><button class="btn primary">Salvar</button></form>`);
+      $('#rp', md.el).onsubmit = async (ev) => { ev.preventDefault(); try { await api('PUT', '/api/users/' + u.id, Object.fromEntries(new FormData(ev.target))); md.close(); toast('Senha redefinida.'); } catch (er) { toast(er.message, true); } };
+    }
+  };
+}
+
+// =============================================================== ATIVIDADE
+async function viewLog() {
+  const logs = await api('GET', '/api/logs');
+  $('#main').innerHTML = `<div class="page"><h1>Atividade da redação</h1><div class="card"><table class="grid"><thead><tr><th>Quando</th><th>Quem</th><th>Área</th><th>O quê</th></tr></thead><tbody>
+    ${logs.map(l => `<tr><td class="mono">${fmtDT(l.at)}</td><td>${esc(l.userName)}</td><td>${esc(l.action)}</td><td>${esc(l.detail)}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">Sem atividade.</td></tr>'}
+  </tbody></table></div></div>`;
+}
+
+boot();

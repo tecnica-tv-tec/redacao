@@ -1,0 +1,7 @@
+# dados locais do modo demonstração (usuários, senhas com hash, pautas de teste)
+data/
+node_modules/
+.claude/
+*.log
+.DS_Store
+Thumbs.db

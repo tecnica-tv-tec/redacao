@@ -1,0 +1,69 @@
+# Redação — Pautas e Espelho de Telejornal (SaaS)
+
+Sistema de redação inspirado no Avid iNews: produção de **pautas**, **calendário** de pautas,
+montagem do **espelho** (rundown) com cronometragem, **laudas**, prompter e equipe com login.
+
+**Versão publicada:** https://tecnica-tv-tec.github.io/redacao/
+(site no GitHub Pages, banco no Supabase, projeto `redacao-tvtec`, região São Paulo).
+Cada envio para a branch `main` publica o site de novo, pelo fluxo `.github/workflows/pages.yml`.
+
+## Módulos
+
+| Tela | O que faz |
+|---|---|
+| **Pautas** | Cadastro no modelo: **1. Retranca** (nome da matéria) · **2. Proposta** (o que se espera da matéria) · **3. Marcação** (entrevistados: nome, função, contato, data, horário, local; roteiro de gravação) · **4. Informações** (o que o jornalista precisa saber). Mais: encaminhamento, equipe, perguntas, imagens/arte, observações. Indicador R·P·M·I na lista. Retranca e Proposta são obrigatórias; para marcar a pauta como "Pronta", "Gravada" ou "Exibida", os 4 itens precisam estar preenchidos. |
+| **Matérias** | Aba própria para o repórter escrever: lista das pautas do dia ("Só as minhas", "Já escritas", busca), editor grande com salvamento automático e, ao lado, a proposta, a marcação e as informações da pauta para consulta. O botão **✎ Matéria** da pauta abre direto aqui. |
+| **Impressão / PDF** | Pauta, matéria ou as duas com o layout da emissora: logotipo, cor, cabeçalho com a retranca e rodapé com número de página. A matéria sai em formato de lauda (marcação · texto). **⬇ Baixar PDF** gera um PDF vetorial, com texto nítido em qualquer zoom e arquivo leve (cerca de 20 KB). **Imprimir** usa a impressora do navegador. O logotipo, a cor e o rodapé são cadastrados em **Equipe → Identidade da emissora**. |
+| **No ar** | Botão **● No ar** no espelho. O apresentador dá OK em cada retranca assim que ela termina (botão grande, Espaço ou Enter; Backspace desfaz). Mostra a retranca no ar, um cronômetro contra o tempo previsto, a próxima, a hora real do OK, a duração real, a diferença e o término projetado. Funciona mesmo com o espelho fechado, e quem está no espelho vê as retrancas exibidas riscadas. |
+| **Matéria** | Seção **5 · Matéria** dentro da pauta, onde o repórter escreve o texto. Tem botões para inserir as marcações [OFF], [SONORA], [PASSAGEM], [ARTE], [GC], [TRILHA] e [IMAGEM], contagem de palavras com tempo estimado, situação (Em redação → Enviada p/ edição → Revisada → Aprovada) e registro de quem editou por último e quando. O texto fica salvo no sistema junto com a pauta. |
+| **Busca** | Pesquisa em todas as datas: retranca, proposta, informações, marcação/entrevistados, encaminhamento e **texto da matéria**. Destaca os termos encontrados e tem filtros por período, status, repórter e "só com matéria escrita". O campo de busca no topo funciona em qualquer tela. Ao clicar num resultado, você lê a pauta e a matéria completas e pode imprimir ou abrir para editar. |
+| **Calendário** | Visão mensal com as retrancas de cada dia, coloridas pelo status. Clique no dia para ver as pautas dele, em uma retranca para abri-la ou em **+** para criar uma pauta naquela data. Um mini calendário também aparece na tela de Pautas. |
+| **Espelho** | Um espelho por telejornal por dia. Blocos separados por intervalos, página automática (A1, A2, B1…), tipos (VT, NC, NOTA, NP, LINK, VIVO…), tempo de cabeça calculado pela leitura (palavras/min), VT, total, **horário no ar**, acumulado, sobra/estouro, arrastar e soltar, inclusão a partir da pauta, status (rascunho → aprovado), fechamento pelo editor, impressão e **prompter**. |
+| **Lauda** | Cabeça, texto do VT/off, deixa, GC e observações, com salvamento automático. Ao enviar a pauta ao espelho, a matéria vira o texto do VT. O botão **Puxar matéria** atualiza esse texto depois. Texto entre `[colchetes]` não conta no tempo de leitura. |
+| **Salvamento automático** | A pauta é gravada sozinha 3 segundos depois que a pessoa para de digitar, assim que houver retranca. Antes disso, e a cada alteração, um rascunho fica guardado no navegador. Se a página fechar, a tela Pautas oferece **Recuperar** a pauta não salva. |
+| **Equipe da pauta** | No item 1 da pauta: **Repórter**, **Repórter cinematográfico** e **Motorista**. Cada campo sugere nomes da lista e também aceita um nome digitado. Os repórteres vêm dos usuários do sistema. Cinegrafistas e motoristas são cadastrados em **Equipe → Equipe técnica** pelo administrador ou pelo chefe de reportagem. |
+| **Equipe** | Funções: Administrador, Chefe de reportagem, Editor, Produtor, Repórter e Apresentador. |
+| **Colaboração** | Atualização automática a cada 4 s e trava de edição ("🔒 em edição por Fulano"). |
+
+## Rodar localmente (modo demonstração)
+
+Requer Node 18+.
+
+```powershell
+node server.js
+```
+
+Abra http://localhost:3000. Os dados ficam em `data/db.json`.
+Login de demonstração: `admin@demo.local` / `demo1234`. Também existem `chefe@`, `produtor@`,
+`reporter@`, `editor@` e `apresentador@demo.local`, todos com a mesma senha.
+
+## Banco de dados no Supabase (produção SaaS)
+
+1. Crie um projeto em https://supabase.com.
+2. No projeto, abra **SQL Editor → New query**, cole todo o arquivo [`supabase/schema.sql`](supabase/schema.sql) e clique em **Run**.
+   O script cria as tabelas, as regras de segurança (RLS: cada emissora só vê os próprios dados),
+   as travas de edição e os convites.
+3. Em **Project Settings → API**, copie a *Project URL* e a chave **anon public**. Cole as duas em
+   [`public/config.js`](public/config.js). Nunca use a chave `service_role` no navegador.
+4. Em **Authentication → URL Configuration**, coloque o endereço do site em *Site URL*
+   (por exemplo, `http://localhost:3000` ou o domínio de produção).
+5. Publique a pasta `public/` em qualquer hospedagem estática (Vercel, Netlify, Cloudflare Pages)
+   ou continue usando `node server.js`. Com o `config.js` preenchido, o app passa a usar o Supabase.
+
+### Como funciona o acesso no Supabase
+- **Criar conta** com o nome da emissora: cria uma nova redação, e você vira o administrador.
+- **Equipe → Convidar**: o administrador registra o e-mail e a função. A pessoa usa **Criar conta**
+  com esse e-mail, deixando o campo da emissora em branco, e entra direto na redação.
+- **Esqueci minha senha**: o Supabase envia o link de redefinição por e-mail.
+
+## Estrutura
+
+```
+server.js                   servidor local (API + arquivos estáticos)
+public/index.html           página
+public/app.js               aplicação (pautas, calendário, espelho, laudas, equipe)
+public/styles.css           visual estilo redação/iNews
+public/config.js            chaves do Supabase
+public/supabase-adapter.js  ponte entre o app e o Supabase
+supabase/schema.sql         banco de dados (tabelas, RLS, gatilhos, funções)
+```
