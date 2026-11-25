@@ -221,48 +221,92 @@ language sql stable security definer set search_path = public as $$
 $$;
 
 -- ---------------------------------------------------------------- cadastro / convite
--- Chamada logo após o primeiro login. Se houver convite para o e-mail, entra na
--- redação convidada; senão cria uma nova emissora com o usuário como administrador.
+-- Quem pode criar conta. Os e-mails dos administradores são cadastrados direto no
+-- banco (SQL Editor) e NÃO ficam neste arquivo:
+--   update public.acesso_config set administradores = array['nome@dominio'];
+-- Ninguém lê nem altera esta tabela pelo aplicativo (RLS sem políticas).
+create table if not exists public.acesso_config (
+  id               boolean primary key default true check (id),
+  dominio          text not null default 'tvtecjundiai.com.br',   -- '' = qualquer domínio
+  administradores  text[] not null default '{}'                    -- sempre em minúsculas
+);
+insert into public.acesso_config (id) values (true) on conflict (id) do nothing;
+alter table public.acesso_config enable row level security;
+revoke all on public.acesso_config from anon, authenticated;
+
+-- Gancho "Before User Created" (Authentication → Hooks): barra cadastro fora do domínio,
+-- tanto por e-mail e senha quanto pelo Google.
+create or replace function public.hook_restrict_signup(event jsonb)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_dom text; v_email text := lower(coalesce(event->'user'->>'email', ''));
+begin
+  select dominio into v_dom from public.acesso_config;
+  if coalesce(v_dom, '') <> '' and split_part(v_email, '@', 2) <> v_dom then
+    return jsonb_build_object('error', jsonb_build_object('http_code', 403,
+      'message', 'Cadastro permitido somente com e-mail corporativo @' || v_dom || '.'));
+  end if;
+  return '{}'::jsonb;
+end $$;
+grant usage on schema public to supabase_auth_admin;
+grant execute on function public.hook_restrict_signup(jsonb) to supabase_auth_admin;
+revoke all on function public.hook_restrict_signup(jsonb) from public, anon, authenticated;
+
+-- Chamada no primeiro acesso. Administradores e convidados entram direto; os demais
+-- e-mails do domínio entram inativos, aguardando um administrador liberar em Equipe.
 create or replace function public.bootstrap(p_org_name text, p_name text)
 returns void language plpgsql security definer set search_path = public as $$
 declare
-  v_uid   uuid := auth.uid();
-  v_email text;
-  v_inv   public.invites;
-  v_org   uuid;
-  v_name  text;
+  v_uid    uuid := auth.uid();
+  v_email  text;
+  v_conf   timestamptz;
+  v_cfg    public.acesso_config;
+  v_inv    public.invites;
+  v_org    uuid;
+  v_name   text;
+  v_admin  boolean;
+  v_novo   boolean := false;
 begin
   if v_uid is null then raise exception 'Não autenticado.'; end if;
   if exists (select 1 from public.profiles where id = v_uid) then return; end if;
-  select email into v_email from auth.users where id = v_uid;
+  select lower(email), email_confirmed_at into v_email, v_conf from auth.users where id = v_uid;
+  if v_conf is null then raise exception 'Confirme seu e-mail antes de entrar.'; end if;
 
-  select * into v_inv from public.invites where lower(email) = lower(v_email);
+  select * into v_cfg from public.acesso_config;
+  if coalesce(v_cfg.dominio, '') <> '' and split_part(v_email, '@', 2) <> v_cfg.dominio then
+    raise exception 'Acesso permitido somente com e-mail corporativo @%.', v_cfg.dominio;
+  end if;
+  v_admin := v_email = any (coalesce(v_cfg.administradores, '{}'));
+  v_name := coalesce(nullif(trim(p_name), ''), v_email);
+
+  select * into v_inv from public.invites where lower(email) = v_email;
   if found then
-    v_name := coalesce(nullif(trim(p_name), ''), v_inv.name, v_email);
     insert into public.profiles(id, org_id, name, email, role)
-      values (v_uid, v_inv.org_id, v_name, lower(v_email), v_inv.role);
+      values (v_uid, v_inv.org_id, coalesce(nullif(trim(p_name), ''), v_inv.name, v_email), v_email,
+              case when v_admin then 'admin' else v_inv.role end);
     delete from public.invites where id = v_inv.id;
     insert into public.logs(org_id, user_id, user_name, action, detail)
       values (v_inv.org_id, v_uid, v_name, 'equipe', 'Entrou na redação por convite');
     return;
   end if;
 
-  if coalesce(trim(p_org_name), '') = '' then
-    raise exception 'Não há convite para este e-mail. Para criar uma nova redação, informe o nome da emissora.';
+  -- uma única redação: a primeira conta cria, as próximas entram nela
+  select id into v_org from public.orgs order by created_at limit 1;
+  if v_org is null then
+    v_novo := true;
+    insert into public.orgs(name) values (coalesce(nullif(trim(p_org_name), ''), 'TV TEC Jundiaí')) returning id into v_org;
+    insert into public.programs(org_id, name, sigla, inicio, duracao) values
+      (v_org, 'JORNAL DA MANHÃ',    'JM',  '06:00:00', '01:00:00'),
+      (v_org, 'JORNAL DO MEIO-DIA', 'JMD', '12:00:00', '00:45:00'),
+      (v_org, 'JORNAL DA NOITE',    'JN',  '19:15:00', '00:35:00');
   end if;
+  -- sem lista de administradores configurada, quem cria a redação administra
+  if v_novo and cardinality(coalesce(v_cfg.administradores, '{}')) = 0 then v_admin := true; end if;
 
-  v_name := coalesce(nullif(trim(p_name), ''), v_email);
-  insert into public.orgs(name) values (trim(p_org_name)) returning id into v_org;
-  insert into public.profiles(id, org_id, name, email, role)
-    values (v_uid, v_org, v_name, lower(v_email), 'admin');
-  insert into public.programs(org_id, name, sigla, inicio, duracao) values
-    (v_org, 'JORNAL DA MANHÃ',    'JM',  '06:00:00', '01:00:00'),
-    (v_org, 'JORNAL DO MEIO-DIA', 'JMD', '12:00:00', '00:45:00'),
-    (v_org, 'JORNAL DA NOITE',    'JN',  '19:15:00', '00:35:00');
+  insert into public.profiles(id, org_id, name, email, role, active)
+    values (v_uid, v_org, v_name, v_email, case when v_admin then 'admin' else 'reporter' end, v_admin);
   insert into public.logs(org_id, user_id, user_name, action, detail)
-    values (v_org, v_uid, v_name, 'signup', 'Emissora ' || trim(p_org_name) || ' criada');
+    values (v_org, v_uid, v_name, 'equipe', case when v_admin then 'Administrador entrou' else 'Pediu acesso (aguarda liberação)' end);
 end $$;
-
 -- ---------------------------------------------------------------- travas
 create or replace function public.acquire_lock(p_key text)
 returns json language plpgsql security definer set search_path = public as $$

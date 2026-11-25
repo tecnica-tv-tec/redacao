@@ -59,6 +59,17 @@ Login de demonstraÃ§Ã£o: `admin@demo.local` / `demo1234`. TambÃ©m existem 
   com esse e-mail, deixando o campo da emissora em branco, e entra direto na redaÃ§Ã£o.
 - **Esqueci minha senha**: o Supabase envia o link de redefiniÃ§Ã£o por e-mail.
 
+## Acesso restrito ao domínio
+
+- Só cria conta quem usa e-mail **@tvtecjundiai.com.br**. A regra está no banco (`public.acesso_config` e o gancho
+  `hook_restrict_signup`, ativado em **Authentication → Hooks → Before User Created**).
+- Os e-mails dos administradores ficam só no banco, não no repositório. Para alterar, rode no SQL Editor:
+  `update public.acesso_config set administradores = array['nome@tvtecjundiai.com.br'];`
+- Administradores e convidados entram direto. Os demais ficam aguardando liberação em **Equipe → Ativar**.
+- **Entrar com Google:** crie um *OAuth client* (tipo Web) no Google Cloud, com o URI de redirecionamento
+  `https://qjedvtmoqcarhkkbausc.supabase.co/auth/v1/callback`, e cole o Client ID e o Client Secret em
+  **Supabase → Authentication → Sign In / Providers → Google**.
+
 ## Estrutura
 
 ```

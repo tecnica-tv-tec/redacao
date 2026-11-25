@@ -6,6 +6,7 @@
 (function () {
   const local = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && !/[?&]supabase=1/.test(location.search);
   window.REDACAO_CONFIG = local ? { supabaseUrl: '', supabaseAnonKey: '' } : {
+    dominioEmail: 'tvtecjundiai.com.br',   // cadastro restrito (a regra real fica no banco)
     supabaseUrl: 'https://qjedvtmoqcarhkkbausc.supabase.co',
     supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFqZWR2dG1vcWNhcmhra2JhdXNjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTU2MjYwODAsImV4cCI6MjExMTIwMjA4MH0.i-HcVpDSmodDNEddO2TUbxaLfQgTAOPiISiNcKBcAFw',
   };

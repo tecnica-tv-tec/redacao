@@ -50,6 +50,10 @@ window.createSupabaseAdapter = function (sb) {
     'User already registered': 'Este e-mail já está cadastrado.',
   })[m] || m;
 
+  const DOMINIO = String((window.REDACAO_CONFIG || {}).dominioEmail || '').toLowerCase();
+  function exigirDominio(email) {
+    if (DOMINIO && !String(email || '').trim().toLowerCase().endsWith('@' + DOMINIO)) fail(`Use seu e-mail corporativo @${DOMINIO}.`);
+  }
   async function requireMe() {
     if (me) return me;
     const { data } = await sb.auth.getSession();
@@ -58,10 +62,11 @@ window.createSupabaseAdapter = function (sb) {
     if (!prof) {
       // primeiro acesso: entra por convite ou cria a emissora com os dados do cadastro
       const meta = data.session.user.user_metadata || {};
-      check(await sb.rpc('bootstrap', { p_org_name: meta.org_name || '', p_name: meta.name || '' }));
+      const boot = await sb.rpc('bootstrap', { p_org_name: meta.org_name || '', p_name: meta.name || meta.full_name || '' });
+      if (boot.error) { await sb.auth.signOut(); fail(boot.error.message, 403); }
       prof = check(await sb.from('profiles').select('*').eq('id', data.session.user.id).maybeSingle());
     }
-    if (!prof || !prof.active) { await sb.auth.signOut(); fail('Seu acesso está desativado. Fale com o administrador.', 401); }
+    if (!prof || !prof.active) { await sb.auth.signOut(); fail('Cadastro recebido, mas o acesso ainda não está liberado. Peça a um administrador para ativá-lo em Equipe.', 403); }
     me = fromDb(prof);
     return me;
   }
@@ -91,12 +96,22 @@ window.createSupabaseAdapter = function (sb) {
   }, false);
   on('POST', '/api/auth/signup', async (b) => {
     if (!b.email || !b.password) fail('Preencha e-mail e senha.');
+    exigirDominio(b.email);
     if (String(b.password).length < 8) fail('A senha deve ter pelo menos 8 caracteres.');
     const { data, error } = await sb.auth.signUp({ email: b.email, password: b.password,
       options: { data: { org_name: b.orgName || '', name: b.name || '' }, emailRedirectTo: location.origin + location.pathname } });
     if (error) fail(translateAuth(error.message));
     if (!data.session) return { ok: true, confirm: true };
     me = null; await requireMe();
+    return { ok: true };
+  }, false);
+  on('POST', '/api/auth/google', async () => {
+    const cfg = window.REDACAO_CONFIG;
+    const st = await fetch(cfg.supabaseUrl + '/auth/v1/settings', { headers: { apikey: cfg.supabaseAnonKey } }).then(r => r.json()).catch(() => null);
+    if (!st || !st.external || !st.external.google) fail('O acesso com Google ainda não foi ativado. Por enquanto, entre com e-mail e senha.');
+    const queryParams = { prompt: 'select_account' }; if (DOMINIO) queryParams.hd = DOMINIO;
+    const { error } = await sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin + location.pathname, queryParams } });
+    if (error) fail(translateAuth(error.message));
     return { ok: true };
   }, false);
   on('POST', '/api/auth/logout', async () => { await sb.auth.signOut(); me = null; return { ok: true }; }, false);
@@ -144,6 +159,7 @@ window.createSupabaseAdapter = function (sb) {
   on('GET', '/api/users', async () => check(await sb.from('profiles').select('*').eq('org_id', me.orgId).order('name')).map(r => publicUser(fromDb(r))));
   on('POST', '/api/users', async (b) => {   // convite
     if (!b.email || !ROLES.includes(b.role)) fail('Informe e-mail e função.');
+    exigirDominio(b.email);
     check(await sb.from('invites').insert({ org_id: me.orgId, email: String(b.email).toLowerCase().trim(), name: b.name || '', role: b.role, created_by: me.id }));
     await log('usuario', `Convidou ${b.email}`);
     return { ok: true };

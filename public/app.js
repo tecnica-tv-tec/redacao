@@ -139,6 +139,7 @@ function renderLogin(mode = 'login') {
     eye: '<path d="M2.5 12S6 5.5 12 5.5 21.500 12 21.5 12 18 18.5 12 18.5 2.500 12 2.500 12Z"/><circle cx="12" cy="12" r="2.800"/>',
   };
   const svg = (k) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ico[k]}</svg>`;
+  const DOM = SUPA_MODE ? (CFG.dominioEmail || '') : '';
   const field = (id, name, label, type, icon, attrs, extra = '') => `
     <div class="lg-field"><label for="${id}">${label}</label>
       <div class="lg-input">${svg(icon)}<input type="${type}" id="${id}" name="${name}" ${attrs}>${type === 'password' ? `<button type="button" class="lg-eye" aria-label="Mostrar senha" aria-pressed="false">${svg('eye')}</button>` : ''}</div>${extra}</div>`;
@@ -161,19 +162,21 @@ function renderLogin(mode = 'login') {
     <main class="lg-panel">
       <div class="lg-card">
         <img class="lg-logo" src="logo-ftvtec.png" alt="FTV Tec" width="436" height="176">
-        <h1>${isLogin ? 'Acesso à redação' : 'Cadastro da emissora'}</h1>
-        <p class="lg-sub">${isLogin ? 'Identifique-se com suas credenciais de equipe.' : 'Registre a emissora e a conta de administração.'}</p>
+        <h1>${isLogin ? 'Acesso à redação' : (SUPA_MODE ? 'Criar conta' : 'Cadastro da emissora')}</h1>
+        <p class="lg-sub">${isLogin ? 'Identifique-se com suas credenciais de equipe.' : (SUPA_MODE ? 'Solicite seu acesso à redação.' : 'Registre a emissora e a conta de administração.')}</p>
         <div class="lg-tabs" data-on="${mode}"><button type="button" data-mode="login" class="${isLogin ? 'on' : ''}">Entrar</button><button type="button" data-mode="signup" class="${isLogin ? '' : 'on'}">Criar conta</button></div>
         <form id="authf" autocomplete="on">
-          ${isLogin ? '' : field('f-org', 'orgName', 'Emissora / Redação', 'text', 'tv', `${SUPA_MODE ? '' : 'required'} placeholder="Ex.: TV TEC Jundiaí"`, SUPA_MODE ? '<span class="lg-help">Recebeu um convite? Deixe em branco e use o e-mail convidado.</span>' : '')
+          ${isLogin ? '' : (SUPA_MODE ? '' : field('f-org', 'orgName', 'Emissora / Redação', 'text', 'tv', 'required placeholder="Ex.: TV TEC Jundiaí"'))
             + field('f-name', 'name', 'Seu nome', 'text', 'user', 'required autocomplete="name" placeholder="Nome e sobrenome"')}
-          ${field('f-email', 'email', 'E-mail profissional', 'email', 'mail', 'required autocomplete="username" placeholder="voce@emissora.com.br"')}
+          ${field('f-email', 'email', 'E-mail profissional', 'email', 'mail', `required autocomplete="username" placeholder="voce@${DOM || 'emissora.com.br'}"`, !isLogin && DOM ? `<span class="lg-help">Somente e-mail corporativo @${DOM}.</span>` : '')}
           ${field('f-pass', 'password', 'Senha', 'password', 'lock', `required minlength="${isLogin ? 1 : 8}" autocomplete="${isLogin ? 'current-password' : 'new-password'}" placeholder="${isLogin ? 'Sua senha' : 'Mínimo de 8 caracteres'}"`)}
           ${SUPA_MODE && isLogin ? '<div class="lg-forgot"><a href="#" id="forgot">Esqueci minha senha</a></div>' : ''}
           <div class="err" id="autherr" role="alert"></div>
           <button class="lg-submit" type="submit"><span>${isLogin ? 'Entrar' : 'Criar conta'}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></button>
         </form>
-        ${isLogin ? '' : '<p class="lg-note">A primeira conta vira administradora e pode convidar a equipe: produtores, repórteres, editores e apresentadores.</p>'}
+        <div class="lg-or"><span>ou</span></div>
+        <button type="button" class="lg-google" id="lg-google"><svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg><span>${isLogin ? 'Entrar' : 'Cadastrar'} com Google</span></button>
+        ${isLogin ? '' : `<p class="lg-note">${SUPA_MODE ? 'Sem convite, o acesso é liberado por um administrador da redação.' : 'A primeira conta vira administradora e pode convidar a equipe.'}</p>`}
       </div>
       <footer class="lg-foot">© ${new Date().getFullYear()} FTV Tec · Uso exclusivo da equipe</footer>
     </main>
@@ -202,6 +205,12 @@ function renderLogin(mode = 'login') {
     catch (er) { msg(er.message); }
     finally { btn.disabled = false; btn.classList.remove('busy'); }
   };
+  $('#lg-google').onclick = async (e) => {
+    if (!SUPA_MODE) return msg('O acesso com Google funciona apenas na versão publicada.');
+    const b = e.currentTarget; b.disabled = true; msg('');
+    try { await api('POST', '/api/auth/google'); } catch (er) { msg(er.message); b.disabled = false; }
+  };
+  if (S.loginMsg) { msg(S.loginMsg); S.loginMsg = ''; }
   const fg = $('#forgot'); if (fg) fg.onclick = async (e) => {
     e.preventDefault();
     const email = $('#f-email').value.trim();
@@ -215,7 +224,7 @@ async function boot() {
   try {
     const me = await api('GET', '/api/me');
     S.me = me.user; S.org = me.org; S.perms = me.perms; S.roles = me.roles;
-  } catch { return renderLogin(); }
+  } catch (e) { if (e.status !== 401 && e.message) S.loginMsg = e.message; return renderLogin(); }
   [S.users, S.programs] = await Promise.all([api('GET', '/api/users'), api('GET', '/api/programs')]);
   if (!S.rd.programId && S.programs.length) S.rd.programId = S.programs[0].id;
   renderShell();
@@ -2188,7 +2197,7 @@ async function viewEquipe() {
     ${S.users.map(u => `<tr data-id="${u.id}"><td><b>${esc(u.name)}</b></td><td>${esc(u.email)}</td>
       <td>${adm ? `<select data-role style="width:auto">${opts(S.roles.map(r => [r.id, r.label]), u.role)}</select>` : esc(u.roleLabel)}</td>
       <td>${u.active ? '<span class="pill st-gravada">Ativo</span>' : '<span class="pill st-caiu">Inativo</span>'}</td><td>${fmtDT(u.createdAt)}</td>
-      ${adm ? `<td><button class="btn sm" data-toggle>${u.active ? 'Desativar' : 'Reativar'}</button>${SUPA_MODE ? '' : ' <button class="btn sm" data-reset>Nova senha</button>'}</td>` : ''}</tr>`).join('')}
+      ${adm ? `<td><button class="btn sm" data-toggle>${u.active ? 'Desativar' : 'Ativar'}</button>${SUPA_MODE ? '' : ' <button class="btn sm" data-reset>Nova senha</button>'}</td>` : ''}</tr>`).join('')}
     </tbody></table></div>
     ${adm && invites.length ? `<div class="card"><div class="pad"><h3 style="margin-top:0">Convites pendentes</h3>
       <table class="grid"><thead><tr><th>E-mail</th><th>Nome</th><th>Função</th><th>Enviado</th><th></th></tr></thead><tbody>
@@ -2276,4 +2285,10 @@ async function viewLog() {
   </tbody></table></div></div>`;
 }
 
+// retorno do Google / link de e-mail com erro (ex.: domínio não permitido)
+(function () {
+  const q = new URLSearchParams(location.hash.includes('error') ? location.hash.slice(1) : location.search);
+  const d = q.get('error_description');
+  if (d) { S.loginMsg = d; history.replaceState(null, '', location.pathname); }
+})();
 boot();
