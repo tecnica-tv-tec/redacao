@@ -59,7 +59,7 @@ const can = (user, perm) => CAN[perm].includes(user.role);
 const PAUTA_FIELDS = ['retranca', 'data', 'editoria', 'status', 'prioridade', 'programaId', 'formato',
   'produtorId', 'reporterId', 'reporterNome', 'cinegrafista', 'motorista', 'editorTexto', 'horario', 'local', 'endereco',
   'proposta', 'historico', 'encaminhamento', 'perguntas', 'imagens', 'arte', 'observacoes', 'entrevistados', 'roteiro', 'tags',
-  'materia', 'materiaStatus'];
+  'materia', 'materiaStatus', 'motivoQueda'];
 // busca sem diferenciar acentos e maiúsculas
 const fold = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 function pautaSearchText(p) {
@@ -382,6 +382,16 @@ route('GET', '/api/pautas', async (req, res, { user, query }) => {
   list.sort((a, b) => (b.data || '').localeCompare(a.data || '') || (a.horario || '').localeCompare(b.horario || '') || a.retranca.localeCompare(b.retranca));
   send(res, 200, list.map(p => pautaOut(p, user)));
 });
+// --- relatório: retrancas do espelho ligadas a pautas, para somar o tempo no ar
+route('GET', '/api/relatorio/itens', async (req, res, { user, query }) => {
+  const rds = db.rundowns.filter(r => r.orgId === user.orgId && (!query.from || r.data >= query.from) && (!query.to || r.data <= query.to));
+  const out = [];
+  rds.forEach(rd => {
+    const pg = db.programs.find(x => x.id === rd.programId) || {};
+    db.items.filter(i => i.rundownId === rd.id && !i.deleted && i.pautaId).forEach(i => out.push({ pautaId: i.pautaId, data: rd.data, programa: pg.name || '', wpm: pg.wpm || 170, tipo: i.tipo, status: i.status, tempoVT: i.tempoVT, tempoCabManual: i.tempoCabManual, cabeca: i.cabeca, texto: i.texto, aoArAt: i.aoArAt || null }));
+  });
+  send(res, 200, out);
+});
 route('GET', '/api/pautas/:id', async (req, res, { user, params }) => {
   const p = db.pautas.find(p => p.id === params.id && p.orgId === user.orgId && !p.deleted);
   if (!p) return err(res, 404, 'Pauta não encontrada.');
@@ -394,9 +404,11 @@ route('GET', '/api/pautas/:id', async (req, res, { user, params }) => {
 route('POST', '/api/pautas', async (req, res, { user, body }) => {
   const data = pick(body, PAUTA_FIELDS);
   if (!data.retranca) return err(res, 400, 'Informe a retranca.');
+  if (data.status === 'caiu' && !String(data.motivoQueda || '').trim()) return err(res, 400, 'Informe o motivo da queda da pauta.');
   const p = Object.assign({ id: uid(), orgId: user.orgId, status: 'sugestao', prioridade: 'normal', data: new Date().toISOString().slice(0, 10), entrevistados: [], roteiro: [] }, data,
     { retranca: String(data.retranca).toUpperCase(), createdBy: user.id, createdAt: now(), updatedAt: now(), updatedBy: user.id });
   if (String(p.materia || '').trim()) { p.materiaAutorId = user.id; p.materiaAt = now(); }
+  p.statusHist = [{ status: p.status, at: p.createdAt, by: user.name }];
   db.pautas.push(p); log(user.orgId, user, 'pauta', `Criou ${p.retranca}`); save();
   send(res, 201, pautaOut(p, user));
 });
@@ -406,9 +418,12 @@ route('PUT', '/api/pautas/:id', async (req, res, { user, body, params }) => {
   const l = lockInfo('p:' + p.id, user);
   if (l && !l.mine) return err(res, 423, `Pauta em edição por ${l.name}.`);
   if (body.updatedAt && body.updatedAt !== p.updatedAt && !body.force) return err(res, 409, 'A pauta foi alterada por outra pessoa. Recarregue antes de salvar.');
-  const oldMateria = p.materia || '';
+  const nextSt = body.status !== undefined ? body.status : p.status, nextMot = body.motivoQueda !== undefined ? body.motivoQueda : p.motivoQueda;
+  if (nextSt === 'caiu' && !String(nextMot || '').trim()) return err(res, 400, 'Informe o motivo da queda da pauta.');
+  const oldMateria = p.materia || '', oldStatus = p.status;
   Object.assign(p, pick(body, PAUTA_FIELDS), { updatedAt: now(), updatedBy: user.id });
   if ((p.materia || '') !== oldMateria) { p.materiaAutorId = user.id; p.materiaAt = now(); }
+  if (p.status !== oldStatus) p.statusHist = [...(p.statusHist || []), { status: p.status, at: now(), by: user.name }];   // tempo de produção (relatório)
   if (p.retranca) p.retranca = String(p.retranca).toUpperCase();
   log(user.orgId, user, 'pauta', `Editou ${p.retranca}`); save();
   send(res, 200, pautaOut(p, user));

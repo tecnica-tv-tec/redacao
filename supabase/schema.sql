@@ -109,6 +109,10 @@ alter table public.pautas add column if not exists materia_at       timestamptz;
 -- EQUIPE da pauta: repórter digitado (quando não é usuário do sistema) e motorista
 alter table public.pautas add column if not exists reporter_nome    text not null default '';
 alter table public.pautas add column if not exists motorista        text not null default '';
+-- QUEDA: justificativa obrigatória quando a pauta cai
+alter table public.pautas add column if not exists motivo_queda     text not null default '';
+-- HISTÓRICO DE STATUS (relatório de tempo de produção): [{status, at, by}]
+alter table public.pautas add column if not exists status_hist      jsonb not null default '[]'::jsonb;
 
 -- Texto de busca (pauta + matéria + entrevistados) com índice para pesquisa rápida
 create extension if not exists pg_trgm with schema extensions;
@@ -339,13 +343,18 @@ end $$;
 -- ---------------------------------------------------------------- gatilhos
 create or replace function public.tg_pautas() returns trigger
 language plpgsql security definer set search_path = public as $$
-declare l public.locks;
+declare l public.locks; v_name text;
 begin
   new.retranca := upper(trim(new.retranca));
+  if new.status = 'caiu' and coalesce(trim(new.motivo_queda), '') = '' then
+    raise exception 'Informe o motivo da queda da pauta.';
+  end if;
+  select name into v_name from public.profiles where id = auth.uid();
   if tg_op = 'INSERT' then
     new.org_id := public.my_org();
     new.created_by := auth.uid();
     new.created_at := now();
+    new.status_hist := jsonb_build_array(jsonb_build_object('status', new.status, 'at', now(), 'by', coalesce(v_name, '')));
     if coalesce(trim(new.materia), '') <> '' then new.materia_autor_id := auth.uid(); new.materia_at := now(); end if;
   else
     if new.materia is distinct from old.materia then
@@ -354,6 +363,10 @@ begin
       new.materia_autor_id := old.materia_autor_id; new.materia_at := old.materia_at;
     end if;
     new.org_id := old.org_id; new.created_by := old.created_by; new.created_at := old.created_at;
+    new.status_hist := old.status_hist;
+    if new.status is distinct from old.status then
+      new.status_hist := coalesce(old.status_hist, '[]'::jsonb) || jsonb_build_object('status', new.status, 'at', now(), 'by', coalesce(v_name, ''));
+    end if;
     select * into l from public.locks
       where org_id = old.org_id and key = 'p:' || old.id and until > now() and user_id <> auth.uid();
     if found then raise exception 'Pauta em edição por %.', l.name; end if;

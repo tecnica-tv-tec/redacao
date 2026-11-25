@@ -103,6 +103,7 @@ const MAT_CLASS = { rascunho: 'em_apuracao', enviada: 'em_producao', revisada: '
 const materiaPill = (p) => String(p.materia || '').trim()
   ? `<span class="pill st-${MAT_CLASS[p.materiaStatus] || 'em_apuracao'}" title="${wordCount(p.materia)} palavras">✎ ${esc(label(MATERIA_STATUS, p.materiaStatus || 'rascunho'))}</span>`
   : '<span class="hint">—</span>';
+const MOTIVOS_QUEDA = ['Entrevistado desmarcou', 'Fato perdeu relevância', 'Equipe deslocada para factual', 'Sem autorização de imagem', 'Clima / chuva', 'Falta de equipe ou carro', 'Pauta derrubada pela chefia'];
 const PRIORIDADES = [['baixa', 'Baixa'], ['normal', 'Normal'], ['alta', 'Alta'], ['urgente', 'Urgente']];
 const FORMATOS = ['VT', 'NC', 'NOTA', 'NP', 'LINK', 'VIVO', 'SONORA', 'STAND-UP', 'ENTREVISTA', 'SÉRIE', 'ARTE'];
 const TIPOS = ['ESCALADA', 'VINHETA', 'CABEÇA', 'NOTA', 'NC', 'NP', 'VT', 'VT+NP', 'SONORA', 'LINK', 'VIVO', 'STAND-UP', 'ENTREVISTA', 'ARTE', 'CHAMADA', 'PASSAGEM', 'ENCERRAMENTO', 'INTERVALO'];
@@ -180,7 +181,7 @@ async function boot() {
   go((location.hash || '#pautas').slice(1));
 }
 function renderShell() {
-  const nav = [['pautas', 'Pautas'], ['materias', 'Matérias'], ['calendario', 'Calendário'], ['espelho', 'Espelho'], ['busca', 'Busca'], ['programas', 'Telejornais'], ['equipe', 'Equipe'], ['log', 'Atividade']];
+  const nav = [['pautas', 'Pautas'], ['materias', 'Matérias'], ['calendario', 'Calendário'], ['espelho', 'Espelho'], ['busca', 'Busca'], ['relatorios', 'Relatórios'], ['programas', 'Telejornais'], ['equipe', 'Equipe'], ['log', 'Atividade']];
   $('#app').innerHTML = `
   <div class="shell">
     <header class="topbar">
@@ -231,7 +232,7 @@ function changePassword() {
 }
 
 async function go(view) {
-  if (!['pautas', 'materias', 'calendario', 'espelho', 'busca', 'programas', 'equipe', 'log'].includes(view)) view = 'pautas';
+  if (!['pautas', 'materias', 'calendario', 'espelho', 'busca', 'relatorios', 'programas', 'equipe', 'log'].includes(view)) view = 'pautas';
   if (S.view !== view) {
     if (S.pautaDirty && !(await autosavePauta()) && !confirm('A pauta ainda não pôde ser salva no sistema (veja o aviso ao lado de Salvar). Ela fica guardada como rascunho neste navegador. Sair mesmo assim?')) return;
     clearTimeout(S.pAutoTimer);
@@ -244,7 +245,7 @@ async function go(view) {
   S.view = view; history.replaceState(null, '', '#' + view);
   $$('[data-go]').forEach(b => b.classList.toggle('on', b.dataset.go === view));
   stopPolling();
-  ({ pautas: viewPautas, materias: viewMaterias, calendario: viewCalendario, espelho: viewEspelho, busca: viewBusca, programas: viewProgramas, equipe: viewEquipe, log: viewLog })[view]();
+  ({ pautas: viewPautas, materias: viewMaterias, calendario: viewCalendario, espelho: viewEspelho, busca: viewBusca, relatorios: viewRelatorios, programas: viewProgramas, equipe: viewEquipe, log: viewLog })[view]();
 }
 window.addEventListener('hashchange', () => { const v = location.hash.slice(1); if (S.me && v && v !== S.view) go(v); });
 function stopPolling() { clearInterval(S.pollTimer); S.pollTimer = null; }
@@ -332,7 +333,7 @@ function renderPautaList() {
     <td>${p.prioridade === 'urgente' ? '<span class="pri-urgente">!!</span>' : p.prioridade === 'alta' ? '<span class="pri-alta">!</span>' : ''}${p.lock && !p.lock.mine ? ` <span class="lockico" title="Em edição por ${esc(p.lock.name)}">🔒</span>` : ''}</td>
     <td class="retr">${esc(p.retranca)}</td>
     <td class="dots">${pautaChecks(p).map(([l, ok]) => `<i class="${ok ? 'ok' : ''}" title="${l}: ${ok ? 'preenchido' : 'pendente'}"></i>`).join('')}</td>
-    <td><span class="pill st-${p.status}">${esc(label(PAUTA_STATUS, p.status))}</span></td>
+    <td><span class="pill st-${p.status}" ${p.status === 'caiu' && p.motivoQueda ? `title="Motivo da queda: ${esc(p.motivoQueda)}"` : ''}>${esc(label(PAUTA_STATUS, p.status))}${p.status === 'caiu' && p.motivoQueda ? ' ⓘ' : ''}</span></td>
     <td>${esc(p.editoria)}</td><td>${esc(repName(p))}</td><td class="mono">${esc(p.horario)}</td>
     ${S.pf.allDates ? `<td class="mono">${fmtDate(p.data)}</td>` : ''}<td><span class="tipo">${esc(p.formato || '')}</span></td>
     <td>${materiaPill(p)}</td></tr>`).join('')}
@@ -383,6 +384,11 @@ function renderPautaEditor() {
         <div class="field"><label>Editoria</label><input type="text" list="dl-edit" data-pf="editoria" value="${F('editoria')}" ${ro}></div>
         <div class="field"><label>Status</label><select data-pf="status" ${ro}>${opts(PAUTA_STATUS, p.status)}</select></div>
         <div class="field"><label>Prioridade</label><select data-pf="prioridade" ${ro}>${opts(PRIORIDADES, p.prioridade)}</select></div>
+      </div>
+      <div class="quedabox" id="queda-box" style="${p.status === 'caiu' ? '' : 'display:none'}">
+        <div class="field"><label>Motivo da queda * <span class="hint" style="text-transform:none;letter-spacing:0">obrigatório quando a pauta cai</span></label>
+          <textarea data-pf="motivoQueda" rows="2" placeholder="Explique por que a pauta caiu: entrevistado desmarcou, fato perdeu relevância, equipe deslocada para factual…" ${ro}>${F('motivoQueda')}</textarea></div>
+        <div class="formbar"><span class="lbl">Motivos frequentes:</span>${MOTIVOS_QUEDA.map(m => `<button class="btn sm" data-motivo="${esc(m)}" ${ro}>${esc(m)}</button>`).join('')}</div>
       </div>
       <div class="row3">
         <div class="field"><label>Telejornal (destino)</label><select data-pf="programaId" ${ro}><option value="">—</option>${opts(S.programs.map(x => [x.id, x.name]), p.programaId)}</select></div>
@@ -475,6 +481,10 @@ function renderPautaEditor() {
   form.addEventListener('input', (e) => {
     const t = e.target;
     if (t.dataset.pf) p[t.dataset.pf] = t.dataset.pf === 'retranca' ? t.value.toUpperCase() : t.value;
+    if (t.dataset.pf === 'status') {
+      const qb = $('#queda-box'); if (qb) qb.style.display = p.status === 'caiu' ? '' : 'none';
+      if (p.status === 'caiu' && !String(p.motivoQueda || '').trim()) setTimeout(() => { const m = $('[data-pf=motivoQueda]'); if (m) m.focus(); }, 0);
+    }
     if (t.dataset.team === 'reporter') {   // nome da lista vira usuário do sistema; senão fica o nome digitado
       const v = t.value.trim(); const u = S.users.find(x => x.name.toLowerCase() === v.toLowerCase());
       if (u) { p.reporterId = u.id; p.reporterNome = ''; } else { p.reporterId = ''; p.reporterNome = v; }
@@ -491,6 +501,10 @@ function renderPautaEditor() {
   form.addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
     e.preventDefault();
+    if (b.dataset.motivo) {   // motivo de queda frequente
+      const ta = $('[data-pf=motivoQueda]', form); ta.value = ta.value.trim() ? ta.value.trim() + '; ' + b.dataset.motivo : b.dataset.motivo;
+      ta.dispatchEvent(new Event('input', { bubbles: true })); ta.focus(); return;
+    }
     if (b.dataset.ins) {   // insere marcação de roteiro no cursor
       const ta = $('[data-pf=materia]', form); const tag = `[${b.dataset.ins}] `;
       const s = ta.selectionStart, before = ta.value.slice(0, s);
@@ -568,6 +582,7 @@ async function autosavePauta() {
   if (S.pSaving) return S.pSaving;
   if (S.pConflict === p) { setPState('Não salva: alterada por outra pessoa · clique em Salvar', true); return false; }
   if (!String(p.retranca || '').trim()) { setPState('Rascunho guardado neste navegador · preencha a retranca para salvar', true); return false; }
+  if (p.status === 'caiu' && !String(p.motivoQueda || '').trim()) { setPState('Rascunho guardado · informe o motivo da queda', true); return false; }
   if (['pronta', 'gravada', 'exibida'].includes(p.status) && pautaChecks(p).some(x => !x[1])) { setPState('Rascunho guardado · complete os 4 itens para este status', true); return false; }
   const seq = S.pEditSeq, wasNew = !p.id;
   setPState('Salvando…', true);
@@ -638,6 +653,7 @@ async function savePauta() {
   const p = S.pauta; if (!p) return;
   if (!String(p.retranca || '').trim()) return toast('Preencha a RETRANCA (nome da matéria).', true);
   if (!String(p.proposta || '').trim()) return toast('Preencha a PROPOSTA: o que se espera dessa matéria.', true);
+  if (p.status === 'caiu' && !String(p.motivoQueda || '').trim()) { const m = $('[data-pf=motivoQueda]'); if (m) m.focus(); return toast('Explique o MOTIVO DA QUEDA antes de salvar a pauta como "Caiu".', true); }
   const missing = pautaChecks(p).filter(x => !x[1]).map(x => x[0]);
   if (['pronta', 'gravada', 'exibida'].includes(p.status) && missing.length)
     return toast(`Para marcar como "${label(PAUTA_STATUS, p.status)}" complete: ${missing.join(', ')}.`, true);
@@ -990,6 +1006,7 @@ function pautaHtml(p, screen) {
     <div>Produção: ${esc(userName(p.produtorId))} · Repórter: ${esc(repName(p))} · Cinegrafista: ${esc(p.cinegrafista || '')} · Motorista: ${esc(p.motorista || '')} · Editor: ${esc(p.editorTexto || '')}</div>
     <div>Horário: ${esc(p.horario || '')} · Local: ${esc(p.local || '')} ${p.endereco ? '— ' + esc(p.endereco) : ''}</div>
     ${rot.length ? `<h2${screen ? ' style="font-size:12px;color:var(--accent);margin:14px 0 4px"' : ''}>ROTEIRO DE GRAVAÇÃO</h2><table class="${screen ? 'grid' : ''}"><tr><th>Hora</th><th>Local</th><th>O que gravar</th></tr>${rot.map(r => `<tr><td>${esc(r.hora)}</td><td>${esc(r.local)}</td><td>${esc(r.acao)}</td></tr>`).join('')}</table>` : ''}
+    ${p.status === 'caiu' ? block('Motivo da queda', p.motivoQueda || '—') : ''}
     ${block('Proposta', p.proposta)}
     ${ents.length ? `<h2${screen ? ' style="font-size:12px;color:var(--accent);margin:14px 0 4px"' : ''}>MARCAÇÃO</h2><table class="${screen ? 'grid' : ''}"><tr><th>Nome</th><th>Função</th><th>Contato</th><th>Data/Hora</th><th>Local</th><th>Conf.</th></tr>${ents.map(e => `<tr><td>${esc(e.nome)}</td><td>${esc(e.funcao)}</td><td>${esc(e.telefone)}</td><td>${fmtDate(e.data)} ${esc(e.horario)}</td><td>${esc(e.local)}${e.obs ? '<br><i>' + esc(e.obs) + '</i>' : ''}</td><td>${e.confirmado ? 'Sim' : 'Não'}</td></tr>`).join('')}</table>` : ''}
     ${block('Informações', p.historico)}
@@ -1052,6 +1069,7 @@ function printDoc(p, mode, download) {
       ['Repórter', repName(p)], ['Cinegrafista', p.cinegrafista], ['Motorista', p.motorista],
       ['Produção', userName(p.produtorId)], ['Editor de texto', p.editorTexto], ['Saída / início', p.horario],
       ['Prioridade', label(PRIORIDADES, p.prioridade)]])}
+    ${p.status === 'caiu' ? sec('Motivo da queda', txt(p.motivoQueda || '—')) : ''}
     ${sec('Proposta', txt(p.proposta))}
     ${sec('Marcação', (ents.length ? `<table class="doc-tab"><thead><tr><th>Entrevistado</th><th>Função</th><th>Contato</th><th>Data / hora</th><th>Local</th><th>Conf.</th></tr></thead><tbody>
         ${ents.map(e => `<tr><td><b>${esc(e.nome)}</b></td><td>${esc(e.funcao)}</td><td>${esc(e.telefone)}</td><td>${fmtDate(e.data)} ${esc(e.horario)}</td><td>${esc(e.local)}${e.obs ? `<div class="doc-obs">${esc(e.obs)}</div>` : ''}</td><td>${e.confirmado ? '✓ Sim' : 'Não'}</td></tr>`).join('')}</tbody></table>` : '')
@@ -1197,6 +1215,7 @@ async function downloadPdf(p, mode, brandHex, fileName, footL, footR) {
         ['Repórter', repName(p)], ['Cinegrafista', p.cinegrafista], ['Motorista', p.motorista],
         ['Produção', userName(p.produtorId)], ['Editor de texto', p.editorTexto], ['Saída / início', p.horario],
         ['Prioridade', label(PRIORIDADES, p.prioridade)]]);
+      if (p.status === 'caiu') section('Motivo da queda', p.motivoQueda || '—');
       section('Proposta', p.proposta);
       const ents = (p.entrevistados || []).filter(e => e.nome);
       const rot = (p.roteiro || []).filter(r => r.local || r.acao);
@@ -1553,6 +1572,209 @@ async function saveMateria(showToast) {
     if (e.status === 409 && confirm(e.message + '\n\nSobrescrever com o seu texto?')) { p.force = true; return saveMateria(showToast); }
     toast(e.message, true); return false;
   }
+}
+
+// =============================================================== RELATÓRIOS (produção por período)
+const REL_GRUPOS = [['produzida', 'Produzidas'], ['andamento', 'Em andamento'], ['caiu', 'Caíram']];
+const REL_COR = { produzida: 'var(--viz-1)', andamento: 'var(--viz-2)', caiu: 'var(--viz-3)' };
+const relGrupo = (s) => ['gravada', 'exibida'].includes(s) ? 'produzida' : s === 'caiu' ? 'caiu' : 'andamento';
+const ymd = (d) => { d = new Date(d); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
+function relPreset(k) {
+  const t = new Date(); const y = t.getFullYear(), m = t.getMonth();
+  if (k === 'mes') return [ymd(new Date(y, m, 1)), ymd(new Date(y, m + 1, 0))];
+  if (k === 'mes_ant') return [ymd(new Date(y, m - 1, 1)), ymd(new Date(y, m, 0))];
+  if (k === '30d') return [addDays(today(), -29), today()];
+  if (k === 'ano') return [ymd(new Date(y, 0, 1)), ymd(new Date(y, 11, 31))];
+  return null;
+}
+// tempo de produção: da criação da pauta até ficar "Gravada" (ou "Exibida")
+function tempoProducao(p) {
+  if (relGrupo(p.status) !== 'produzida') return null;
+  const h = (p.statusHist || []).find(x => x.status === 'gravada') || (p.statusHist || []).find(x => x.status === 'exibida');
+  const end = h ? Date.parse(h.at) : Date.parse(p.updatedAt || 0);
+  const ini = Date.parse(p.createdAt || 0);
+  if (!end || !ini || end < ini) return null;
+  return { s: (end - ini) / 1000, aprox: !h };
+}
+const fmtLongo = (s) => { if (s == null) return '—'; const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.round(s % 3600 / 60); return d ? `${d}d ${h}h` : h ? `${h}h ${String(m).padStart(2, '0')}min` : `${m} min`; };
+function duracaoItem(i) {
+  const wpm = i.wpm || 170;
+  const cab = i.tempoCabManual ? toSec(i.tempoCabManual) : readSec(i.cabeca, wpm);
+  let vt = toSec(i.tempoVT); if (!vt && READ_TYPES.includes(i.tipo)) vt = readSec(i.texto, wpm);
+  return i.status === 'caiu' ? 0 : cab + vt;
+}
+async function viewRelatorios() {
+  if (!S.rf) { const [a, b] = relPreset('mes'); S.rf = { preset: 'mes', from: a, to: b, agrupar: 'editoria', editoria: '', tema: '', grupo: '', reporter: '', programa: '', modo: 'grafico' }; }
+  const F = S.rf;
+  const reps = [...new Set(S.users.filter(u => ['reporter', 'apresentador'].includes(u.role)).map(u => u.name))];
+  $('#main').innerHTML = `<div class="page relpage">
+    <div class="rel-top"><h1>Relatório de produção</h1><div style="flex:1"></div>
+      <div class="seg" id="rel-modo" role="tablist">${[['grafico', 'Gráfico'], ['tabela', 'Tabela'], ['lista', 'Lista']].map(([k, l]) => `<button data-modo="${k}" class="${F.modo === k ? 'on' : ''}" role="tab" aria-selected="${F.modo === k}">${l}</button>`).join('')}</div>
+      <button class="btn sm" id="rel-csv">Exportar planilha (CSV)</button><button class="btn sm" id="rel-print">Imprimir</button></div>
+    <div class="rel-filtros">
+      <div class="field"><label>Período</label><select id="rf-preset">${opts([['mes', 'Este mês'], ['mes_ant', 'Mês passado'], ['30d', 'Últimos 30 dias'], ['ano', 'Este ano'], ['custom', 'Personalizado']], F.preset)}</select></div>
+      <div class="field"><label>De</label><input type="date" id="rf-from" value="${F.from}"></div>
+      <div class="field"><label>Até</label><input type="date" id="rf-to" value="${F.to}"></div>
+      <div class="field"><label>Agrupar por</label><select id="rf-agrupar">${opts([['editoria', 'Editoria'], ['tema', 'Tema (palavra-chave)'], ['reporter', 'Repórter'], ['programa', 'Telejornal'], ['geral', 'Geral (tudo junto)']], F.agrupar)}</select></div>
+      <div class="field"><label>Editoria</label><select id="rf-editoria"><option value="">Todas</option>${opts(EDITORIAS, F.editoria)}</select></div>
+      <div class="field"><label>Tema / assunto</label><input type="search" id="rf-tema" value="${esc(F.tema)}" placeholder="Ex.: saúde, eleição, chuva…"></div>
+      <div class="field"><label>Situação</label><select id="rf-grupo"><option value="">Todas</option>${opts(REL_GRUPOS, F.grupo)}</select></div>
+      <div class="field"><label>Repórter</label><select id="rf-reporter"><option value="">Todos</option>${opts(reps, F.reporter)}</select></div>
+      <div class="field"><label>Telejornal</label><select id="rf-programa"><option value="">Todos</option>${opts(S.programs.map(x => [x.id, x.name]), F.programa)}</select></div>
+    </div>
+    <div id="rel-body"><div class="empty">Carregando…</div></div></div>`;
+  const reload = async () => { await relCarregar(); relRender(); };
+  const set = (k, v, load) => { F[k] = v; load ? reload() : relRender(); };
+  $('#rf-preset').onchange = (e) => { F.preset = e.target.value; const r = relPreset(F.preset); if (r) { [F.from, F.to] = r; $('#rf-from').value = F.from; $('#rf-to').value = F.to; reload(); } };
+  $('#rf-from').onchange = (e) => { F.preset = 'custom'; $('#rf-preset').value = 'custom'; set('from', e.target.value, true); };
+  $('#rf-to').onchange = (e) => { F.preset = 'custom'; $('#rf-preset').value = 'custom'; set('to', e.target.value, true); };
+  ['agrupar', 'editoria', 'grupo', 'reporter', 'programa'].forEach(k => $('#rf-' + k).onchange = (e) => set(k, e.target.value));
+  let qt; $('#rf-tema').oninput = (e) => { clearTimeout(qt); qt = setTimeout(() => set('tema', e.target.value.trim()), 250); };
+  $('#rel-modo').onclick = (e) => { const b = e.target.closest('[data-modo]'); if (!b) return; F.modo = b.dataset.modo; $$('#rel-modo button').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-selected', x === b); }); relRender(); };
+  $('#rel-csv').onclick = relCsv;
+  $('#rel-print').onclick = relPrint;
+  await reload();
+}
+async function relCarregar() {
+  const F = S.rf;
+  if (F.from > F.to) { S.relData = { pautas: [], itens: [] }; return; }
+  const [pautas, itens] = await Promise.all([api('GET', `/api/pautas?from=${F.from}&to=${F.to}`), api('GET', `/api/relatorio/itens?from=${F.from}&to=${F.to}`)]);
+  S.relData = { pautas, itens };
+}
+function relLinhas() {
+  const F = S.rf, D = S.relData || { pautas: [], itens: [] };
+  const durPorPauta = {}, noArPorPauta = {};
+  D.itens.forEach(i => { durPorPauta[i.pautaId] = (durPorPauta[i.pautaId] || 0) + duracaoItem(i); if (i.aoArAt) noArPorPauta[i.pautaId] = true; });
+  const terms = fold(F.tema).split(/\s+/).filter(Boolean);
+  const progName = (id) => (S.programs.find(x => x.id === id) || {}).name || '';
+  return D.pautas.map(p => {
+    const tp = tempoProducao(p); const tags = String(p.tags || '').split(',').map(s => s.trim()).filter(Boolean);
+    return { p, grupo: relGrupo(p.status), rep: repName(p), prog: progName(p.programaId), tags, tProd: tp ? tp.s : null, aprox: tp ? tp.aprox : false,
+      dur: durPorPauta[p.id] || 0, noAr: !!noArPorPauta[p.id] || p.status === 'exibida' };
+  }).filter(r => (!F.editoria || r.p.editoria === F.editoria) && (!F.grupo || r.grupo === F.grupo) && (!F.reporter || r.rep === F.reporter) && (!F.programa || r.p.programaId === F.programa)
+    && (!terms.length || terms.every(t => fold([r.p.retranca, r.p.proposta, r.p.tags, r.p.editoria, r.p.historico].join(' ')).includes(t))));
+}
+function relChaves(r) {
+  const k = S.rf.agrupar;
+  if (k === 'geral') return ['Geral'];
+  if (k === 'tema') return r.tags.length ? r.tags.map(t => t.toLowerCase()) : ['(sem palavra-chave)'];
+  if (k === 'reporter') return [r.rep || '(sem repórter)'];
+  if (k === 'programa') return [r.prog || '(sem telejornal)'];
+  return [r.p.editoria || '(sem editoria)'];
+}
+function relResumo(rows) {
+  const g = {}; rows.forEach(r => relChaves(r).forEach(k => { (g[k] = g[k] || []).push(r); }));
+  return Object.entries(g).map(([nome, rs]) => {
+    const prodT = rs.map(r => r.tProd).filter(x => x != null);
+    const c = { produzida: 0, andamento: 0, caiu: 0 }; rs.forEach(r => c[r.grupo]++);
+    return { nome, total: rs.length, ...c, aprov: rs.length ? c.produzida / rs.length : 0, medProd: prodT.length ? prodT.reduce((a, b) => a + b, 0) / prodT.length : null, dur: rs.reduce((a, r) => a + r.dur, 0), noAr: rs.filter(r => r.noAr).length, rows: rs };
+  }).sort((a, b) => b.total - a.total || a.nome.localeCompare(b.nome, 'pt-BR'));
+}
+const pct = (x) => Math.round(x * 100) + '%';
+function relRender() {
+  const el = $('#rel-body'); if (!el) return;
+  const F = S.rf;
+  if (F.from > F.to) { el.innerHTML = '<div class="empty">A data inicial é depois da data final.</div>'; return; }
+  const rows = relLinhas(), R = relResumo(rows);
+  const c = { produzida: 0, andamento: 0, caiu: 0 }; rows.forEach(r => c[r.grupo]++);
+  const prodT = rows.map(r => r.tProd).filter(x => x != null);
+  const dur = rows.reduce((a, r) => a + r.dur, 0);
+  const tile = (l, v, sub) => `<div class="stat"><div class="stat-l">${l}</div><div class="stat-v">${v}</div>${sub ? `<div class="stat-s">${sub}</div>` : ''}</div>`;
+  const periodo = `${fmtDate(F.from)} a ${fmtDate(F.to)}`;
+  el.innerHTML = `<div class="hint" style="margin:-4px 0 10px">Período: <b>${periodo}</b> · pautas pela data da pauta · ${rows.length} pauta(s) no filtro</div>
+    <div class="stats">
+      ${tile('Pautas', rows.length)}
+      ${tile('Produzidas', c.produzida, 'gravadas ou exibidas')}
+      ${tile('Em andamento', c.andamento)}
+      ${tile('Caíram', c.caiu)}
+      ${tile('Aproveitamento', rows.length ? pct(c.produzida / rows.length) : '—', 'produzidas ÷ pautas')}
+      ${tile('Tempo médio de produção', prodT.length ? fmtLongo(prodT.reduce((a, b) => a + b, 0) / prodT.length) : '—', 'da criação até gravada')}
+      ${tile('Tempo de matérias no espelho', fmtDur(dur, true), `${rows.filter(r => r.noAr).length} foram ao ar`)}
+    </div>
+    ${!rows.length ? '<div class="empty">Nenhuma pauta neste período e filtro.</div>' : F.modo === 'tabela' ? relTabela(R, rows) : F.modo === 'lista' ? relLista(R) : relGraficos(R, rows)}`;
+  relTooltip(el);
+}
+const AGR_LABEL = { editoria: 'Editoria', tema: 'Tema', reporter: 'Repórter', programa: 'Telejornal', geral: 'Grupo' };
+function relTabela(R, rows) {
+  const ord = rows.slice().sort((a, b) => (a.p.data || '').localeCompare(b.p.data || '') || a.p.retranca.localeCompare(b.p.retranca));
+  return `<div class="card"><div class="pad" style="padding-bottom:0"><h3 style="margin:0">Resumo por ${AGR_LABEL[S.rf.agrupar].toLowerCase()}</h3></div>
+    <table class="grid reltab"><thead><tr><th>${AGR_LABEL[S.rf.agrupar]}</th><th class="num">Pautas</th><th class="num">Produzidas</th><th class="num">Em andamento</th><th class="num">Caíram</th><th class="num">Aproveitamento</th><th class="num">Tempo médio de produção</th><th class="num">Tempo no espelho</th></tr></thead><tbody>
+    ${R.map(g => `<tr><td><b>${esc(g.nome)}</b></td><td class="num">${g.total}</td><td class="num">${g.produzida}</td><td class="num">${g.andamento}</td><td class="num">${g.caiu}</td><td class="num">${pct(g.aprov)}</td><td class="num">${fmtLongo(g.medProd)}</td><td class="num">${fmtDur(g.dur, true)}</td></tr>`).join('')}
+    </tbody></table></div>
+    <div class="card"><div class="pad" style="padding-bottom:0"><h3 style="margin:0">Pautas do período</h3></div>
+    <table class="grid reltab"><thead><tr><th>Data</th><th>Retranca</th><th>Editoria</th><th>Tema</th><th>Repórter</th><th>Telejornal</th><th>Status</th><th class="num">Tempo de produção</th><th class="num">No espelho</th><th>Motivo da queda</th></tr></thead><tbody>
+    ${ord.map(r => `<tr class="row" data-pid="${r.p.id}"><td class="mono">${fmtDate(r.p.data)}</td><td class="retr">${esc(r.p.retranca)}</td><td>${esc(r.p.editoria)}</td><td>${esc(r.tags.join(', '))}</td><td>${esc(r.rep)}</td><td>${esc(r.prog)}</td>
+      <td><span class="pill st-${r.p.status}">${esc(label(PAUTA_STATUS, r.p.status))}</span></td><td class="num">${fmtLongo(r.tProd)}${r.aprox ? '<span class="hint" title="Pauta anterior ao histórico de status: tempo aproximado pela última alteração"> ≈</span>' : ''}</td>
+      <td class="num">${r.dur ? fmtDur(r.dur) : '—'}</td><td>${esc(r.p.motivoQueda || '')}</td></tr>`).join('')}
+    </tbody></table></div>`;
+}
+function relLista(R) {
+  return R.map(g => `<div class="card relgroup"><div class="pad">
+    <div class="rg-h"><h3>${esc(g.nome)}</h3><span class="hint">${g.total} pauta(s) · ${g.produzida} produzida(s) · ${g.caiu} caiu(ram) · aproveitamento ${pct(g.aprov)} · tempo médio ${fmtLongo(g.medProd)}</span></div>
+    ${g.rows.slice().sort((a, b) => (a.p.data || '').localeCompare(b.p.data || '')).map(r => `<div class="rl-item row" data-pid="${r.p.id}">
+      <div class="rl-main"><span class="mono hint">${fmtDate(r.p.data)}</span> <b>${esc(r.p.retranca)}</b> <span class="pill st-${r.p.status}">${esc(label(PAUTA_STATUS, r.p.status))}</span></div>
+      <div class="hint">${[r.rep && 'Repórter: ' + r.rep, r.prog, r.tProd != null && 'Produção: ' + fmtLongo(r.tProd), r.dur && 'No espelho: ' + fmtDur(r.dur)].filter(Boolean).map(esc).join(' · ')}</div>
+      ${r.p.status === 'caiu' ? `<div class="rl-queda">Motivo da queda: ${esc(r.p.motivoQueda || 'não informado')}</div>` : ''}
+    </div>`).join('')}
+  </div></div>`).join('');
+}
+function relGraficos(R, rows) {
+  const top = R.slice(0, 12); const resto = R.slice(12);
+  if (resto.length) { const o = { nome: `Outros (${resto.length})`, total: 0, produzida: 0, andamento: 0, caiu: 0 }; resto.forEach(g => { o.total += g.total; o.produzida += g.produzida; o.andamento += g.andamento; o.caiu += g.caiu; }); top.push(o); }
+  const maxT = Math.max(...top.map(g => g.total), 1);
+  const legend = `<div class="viz-legend">${REL_GRUPOS.map(([k, l]) => `<span><i style="background:${REL_COR[k]}"></i>${l}</span>`).join('')}</div>`;
+  const barras = top.map(g => `<div class="hb-row"><div class="hb-l" title="${esc(g.nome)}">${esc(g.nome)}</div>
+    <div class="hb-track"><div class="hb-stack" style="width:${g.total / maxT * 100}%">${REL_GRUPOS.filter(([k]) => g[k]).map(([k, l]) => `<div class="hb-seg" style="flex:${g[k]};background:${REL_COR[k]}" data-tip="<b>${esc(g.nome)}</b><br>${l}: ${g[k]} de ${g.total}"></div>`).join('')}</div>
+    <span class="hb-v">${g.total}</span></div></div>`).join('');
+  // pautas por dia
+  const dias = []; for (let d = S.rf.from; d <= S.rf.to && dias.length < 370; d = addDays(d, 1)) dias.push(d);
+  const porDia = {}; rows.forEach(r => { porDia[r.p.data] = (porDia[r.p.data] || 0) + 1; });
+  const maxD = Math.max(...dias.map(d => porDia[d] || 0), 1);
+  const tick = Math.ceil(dias.length / 10);
+  const colunas = dias.map((d, i) => `<div class="cc-col" data-tip="<b>${fmtDate(d)}</b> (${esc(weekday(d))})<br>${porDia[d] || 0} pauta(s)"><div class="cc-bar" style="height:${(porDia[d] || 0) / maxD * 100}%"></div><span class="cc-x">${i % tick === 0 ? d.slice(8, 10) + '/' + d.slice(5, 7) : ''}</span></div>`).join('');
+  // tempo médio de produção
+  const comT = R.filter(g => g.medProd != null).slice(0, 12); const maxP = Math.max(...comT.map(g => g.medProd), 1);
+  const tempos = comT.map(g => `<div class="hb-row"><div class="hb-l" title="${esc(g.nome)}">${esc(g.nome)}</div><div class="hb-track"><div class="hb-stack" style="width:${Math.max(1, g.medProd / maxP * 100)}%"><div class="hb-seg" style="flex:1;background:var(--viz-1)" data-tip="<b>${esc(g.nome)}</b><br>Tempo médio: ${fmtLongo(g.medProd)}<br>${g.produzida} produzida(s)"></div></div><span class="hb-v">${fmtLongo(g.medProd)}</span></div></div>`).join('');
+  // motivos de queda
+  const mot = {}; rows.filter(r => r.grupo === 'caiu').forEach(r => { const k = String(r.p.motivoQueda || 'Não informado').split(';')[0].trim() || 'Não informado'; mot[k] = (mot[k] || 0) + 1; });
+  const motL = Object.entries(mot).sort((a, b) => b[1] - a[1]).slice(0, 10); const maxM = Math.max(...motL.map(x => x[1]), 1);
+  const motivos = motL.map(([k, n]) => `<div class="hb-row"><div class="hb-l" title="${esc(k)}">${esc(k)}</div><div class="hb-track"><div class="hb-stack" style="width:${n / maxM * 100}%"><div class="hb-seg" style="flex:1;background:var(--viz-1)" data-tip="<b>${esc(k)}</b><br>${n} pauta(s)"></div></div><span class="hb-v">${n}</span></div></div>`).join('');
+  return `<div class="viz-grid">
+    <div class="card viz"><div class="pad"><h3>Pautas por ${AGR_LABEL[S.rf.agrupar].toLowerCase()}</h3>${legend}<div class="hb">${barras}</div></div></div>
+    <div class="card viz"><div class="pad"><h3>Pautas por dia</h3><div class="hint">Quantidade de pautas por data da pauta</div><div class="cc" style="--n:${dias.length}"><div class="cc-grid"><span>${maxD}</span><span>${Math.round(maxD / 2)}</span><span>0</span></div><div class="cc-cols">${colunas}</div></div></div></div>
+    <div class="card viz"><div class="pad"><h3>Tempo médio de produção por ${AGR_LABEL[S.rf.agrupar].toLowerCase()}</h3><div class="hint">Da criação da pauta até ela ficar "Gravada"</div>${comT.length ? `<div class="hb">${tempos}</div>` : '<div class="empty">Nenhuma pauta produzida no período.</div>'}</div></div>
+    <div class="card viz"><div class="pad"><h3>Motivos de queda</h3><div class="hint">${rows.filter(r => r.grupo === 'caiu').length} pauta(s) caíram no período</div>${motL.length ? `<div class="hb">${motivos}</div>` : '<div class="empty">Nenhuma pauta caiu no período.</div>'}</div></div>
+  </div>`;
+}
+// tooltip único para as marcas dos gráficos + abrir pauta ao clicar nas linhas
+function relTooltip(root) {
+  let tip = $('#viz-tip'); if (!tip) { tip = document.createElement('div'); tip.id = 'viz-tip'; tip.className = 'viz-tip'; document.body.appendChild(tip); }
+  root.onmousemove = (e) => {
+    const t = e.target.closest('[data-tip]'); if (!t) { tip.style.display = 'none'; return; }
+    tip.innerHTML = t.dataset.tip; tip.style.display = 'block';
+    const x = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8), y = Math.max(8, e.clientY - tip.offsetHeight - 12);
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+  };
+  root.onmouseleave = () => { tip.style.display = 'none'; };
+  root.onclick = (e) => { const r = e.target.closest('[data-pid]'); if (r) showPautaReadOnly(r.dataset.pid); };
+}
+function relCsv() {
+  const rows = relLinhas(); const q = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+  const head = ['Data', 'Retranca', 'Editoria', 'Tema', 'Repórter', 'Telejornal', 'Status', 'Situação', 'Tempo de produção (horas)', 'Tempo no espelho (mm:ss)', 'Foi ao ar', 'Motivo da queda'];
+  const lines = rows.map(r => [fmtDate(r.p.data), r.p.retranca, r.p.editoria, r.tags.join(', '), r.rep, r.prog, label(PAUTA_STATUS, r.p.status), label(REL_GRUPOS, r.grupo),
+    r.tProd != null ? (r.tProd / 3600).toFixed(1).replace('.', ',') : '', r.dur ? fmtDur(r.dur) : '', r.noAr ? 'Sim' : 'Não', r.p.motivoQueda || ''].map(q).join(';'));
+  const blob = new Blob(['﻿' + [head.map(q).join(';'), ...lines].join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `relatorio-producao_${S.rf.from}_a_${S.rf.to}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+function relPrint() {
+  const rows = relLinhas(), R = relResumo(rows); const F = S.rf;
+  const c = { produzida: 0, andamento: 0, caiu: 0 }; rows.forEach(r => c[r.grupo]++);
+  doPrint(`<h1>Relatório de produção — ${esc(S.org.name)}</h1><div>Período: ${fmtDate(F.from)} a ${fmtDate(F.to)} · ${rows.length} pauta(s) · ${c.produzida} produzida(s) · ${c.andamento} em andamento · ${c.caiu} caíram · aproveitamento ${rows.length ? pct(c.produzida / rows.length) : '—'}</div>
+    <h2>Resumo por ${AGR_LABEL[F.agrupar].toLowerCase()}</h2>
+    <table><tr><th>${AGR_LABEL[F.agrupar]}</th><th>Pautas</th><th>Produzidas</th><th>Em andamento</th><th>Caíram</th><th>Aproveitamento</th><th>Tempo médio de produção</th><th>Tempo no espelho</th></tr>
+    ${R.map(g => `<tr><td><b>${esc(g.nome)}</b></td><td>${g.total}</td><td>${g.produzida}</td><td>${g.andamento}</td><td>${g.caiu}</td><td>${pct(g.aprov)}</td><td>${fmtLongo(g.medProd)}</td><td>${fmtDur(g.dur, true)}</td></tr>`).join('')}</table>
+    <h2>Pautas</h2><table><tr><th>Data</th><th>Retranca</th><th>Editoria</th><th>Repórter</th><th>Status</th><th>Produção</th><th>No espelho</th><th>Motivo da queda</th></tr>
+    ${rows.map(r => `<tr><td>${fmtDate(r.p.data)}</td><td><b>${esc(r.p.retranca)}</b></td><td>${esc(r.p.editoria)}</td><td>${esc(r.rep)}</td><td>${esc(label(PAUTA_STATUS, r.p.status))}</td><td>${fmtLongo(r.tProd)}</td><td>${r.dur ? fmtDur(r.dur) : ''}</td><td>${esc(r.p.motivoQueda || '')}</td></tr>`).join('')}</table>`);
 }
 
 // =============================================================== BUSCA (pautas + matérias)

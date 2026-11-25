@@ -11,7 +11,7 @@ window.createSupabaseAdapter = function (sb) {
     editRundown: ROLES, approveRundown: ['admin', 'chefe', 'editor'], deletePauta: ['admin', 'chefe', 'produtor'],
   };
   const PAUTA_FIELDS = ['retranca', 'data', 'editoria', 'status', 'prioridade', 'programaId', 'formato', 'produtorId', 'reporterId', 'reporterNome', 'cinegrafista', 'motorista', 'editorTexto',
-    'horario', 'local', 'endereco', 'proposta', 'historico', 'encaminhamento', 'perguntas', 'imagens', 'arte', 'observacoes', 'entrevistados', 'roteiro', 'tags', 'materia', 'materiaStatus'];
+    'horario', 'local', 'endereco', 'proposta', 'historico', 'encaminhamento', 'perguntas', 'imagens', 'arte', 'observacoes', 'entrevistados', 'roteiro', 'tags', 'materia', 'materiaStatus', 'motivoQueda'];
   const ITEM_FIELDS = ['retranca', 'tipo', 'apresentador', 'reporter', 'editor', 'cabeca', 'deixa', 'texto', 'gc', 'tempoVT', 'tempoCabManual', 'status', 'obs', 'pautaId', 'flagged', 'pagina'];
   const PROGRAM_FIELDS = ['name', 'sigla', 'inicio', 'duracao', 'wpm', 'apresentadores', 'ativo'];
 
@@ -314,6 +314,15 @@ window.createSupabaseAdapter = function (sb) {
     return { ok: true };
   });
 
+  // relatório: retrancas ligadas a pautas nos espelhos do período
+  on('GET', '/api/relatorio/itens', async (b, p, q) => {
+    let qb = sb.from('items').select('pauta_id, tipo, status, tempo_vt, tempo_cab_manual, cabeca, texto, ao_ar_at, rundowns!inner(data, programs(name, wpm))')
+      .not('pauta_id', 'is', null).eq('deleted', false);
+    if (q.from) qb = qb.gte('rundowns.data', q.from);
+    if (q.to) qb = qb.lte('rundowns.data', q.to);
+    return check(await qb).map(i => ({ pautaId: i.pauta_id, data: i.rundowns.data, programa: (i.rundowns.programs || {}).name || '', wpm: (i.rundowns.programs || {}).wpm || 170,
+      tipo: i.tipo, status: i.status, tempoVT: i.tempo_vt, tempoCabManual: i.tempo_cab_manual, cabeca: i.cabeca, texto: i.texto, aoArAt: i.ao_ar_at }));
+  });
   on('GET', '/api/logs', async () => check(await sb.from('logs').select('*').order('at', { ascending: false }).limit(200)).map(fromDb));
 
   // ------------------------------------------------------------ despacho
