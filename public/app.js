@@ -142,7 +142,6 @@ function renderLogin(mode = 'login') {
   const field = (id, name, label, type, icon, attrs, extra = '') => `
     <div class="lg-field"><label for="${id}">${label}</label>
       <div class="lg-input">${svg(icon)}<input type="${type}" id="${id}" name="${name}" ${attrs}>${type === 'password' ? `<button type="button" class="lg-eye" aria-label="Mostrar senha" aria-pressed="false">${svg('eye')}</button>` : ''}</div>${extra}</div>`;
-  const feats = [['Pautas e matérias', 'O repórter escreve e toda a redação encontra.'], ['Espelho e No Ar', 'Roteiro cronometrado e OK do apresentador ao vivo.'], ['Edição e relatórios', 'Roteiro para o editor de imagens e controle da produção.']];
   $('#app').innerHTML = `
   <div class="lg">
     <aside class="lg-stage" aria-hidden="true">
@@ -150,22 +149,25 @@ function renderLogin(mode = 'login') {
         <circle class="r1" cx="300" cy="300" r="280"/><circle class="r2" cx="300" cy="300" r="215"/><circle class="r3" cx="300" cy="300" r="150"/>
       </svg>
       <div class="lg-stage-in">
-        <span class="lg-live"><i></i> Redação ao vivo</span>
-        <h2>Da pauta ao ar, <br><em>em um só lugar.</em></h2>
-        <p>O sistema de jornalismo da emissora para produzir, escrever, editar e exibir o telejornal.</p>
-        <ul>${feats.map(([h, d]) => `<li><span></span><div><b>${h}</b><small>${d}</small></div></li>`).join('')}</ul>
+        <span class="lg-kicker">Departamento de Jornalismo</span>
+        <h2>Central de Produção Jornalística</h2>
+        <p>Apuração, reportagem, edição e exibição do telejornal em um fluxo integrado.</p>
+      </div>
+      <div class="lg-base">
+        <ol class="lg-flow">${['Pauta', 'Reportagem', 'Edição', 'Exibição'].map((s, i) => `<li><span>0${i + 1}</span>${s}</li>`).join('')}</ol>
+        <div class="lg-now"><span id="lg-date"></span><b id="lg-clock"></b></div>
       </div>
     </aside>
     <main class="lg-panel">
       <div class="lg-card">
         <img class="lg-logo" src="logo-ftvtec.png" alt="FTV Tec" width="436" height="176">
-        <h1>${isLogin ? 'Acesse a redação' : 'Cadastre sua emissora'}</h1>
-        <p class="lg-sub">${isLogin ? 'Entre com seu e-mail e senha.' : 'Crie sua conta para começar.'}</p>
+        <h1>${isLogin ? 'Acesso à redação' : 'Cadastro da emissora'}</h1>
+        <p class="lg-sub">${isLogin ? 'Identifique-se com suas credenciais de equipe.' : 'Registre a emissora e a conta de administração.'}</p>
         <div class="lg-tabs" data-on="${mode}"><button type="button" data-mode="login" class="${isLogin ? 'on' : ''}">Entrar</button><button type="button" data-mode="signup" class="${isLogin ? '' : 'on'}">Criar conta</button></div>
         <form id="authf" autocomplete="on">
           ${isLogin ? '' : field('f-org', 'orgName', 'Emissora / Redação', 'text', 'tv', `${SUPA_MODE ? '' : 'required'} placeholder="Ex.: TV TEC Jundiaí"`, SUPA_MODE ? '<span class="lg-help">Recebeu um convite? Deixe em branco e use o e-mail convidado.</span>' : '')
             + field('f-name', 'name', 'Seu nome', 'text', 'user', 'required autocomplete="name" placeholder="Nome e sobrenome"')}
-          ${field('f-email', 'email', 'E-mail', 'email', 'mail', 'required autocomplete="username" placeholder="voce@emissora.com.br"')}
+          ${field('f-email', 'email', 'E-mail profissional', 'email', 'mail', 'required autocomplete="username" placeholder="voce@emissora.com.br"')}
           ${field('f-pass', 'password', 'Senha', 'password', 'lock', `required minlength="${isLogin ? 1 : 8}" autocomplete="${isLogin ? 'current-password' : 'new-password'}" placeholder="${isLogin ? 'Sua senha' : 'Mínimo de 8 caracteres'}"`)}
           ${SUPA_MODE && isLogin ? '<div class="lg-forgot"><a href="#" id="forgot">Esqueci minha senha</a></div>' : ''}
           <div class="err" id="autherr" role="alert"></div>
@@ -173,9 +175,15 @@ function renderLogin(mode = 'login') {
         </form>
         ${isLogin ? '' : '<p class="lg-note">A primeira conta vira administradora e pode convidar a equipe: produtores, repórteres, editores e apresentadores.</p>'}
       </div>
-      <footer class="lg-foot">FTV Tec · Sistema de Redação</footer>
+      <footer class="lg-foot">© ${new Date().getFullYear()} FTV Tec · Uso exclusivo da equipe</footer>
     </main>
   </div>`;
+  const tick = () => {
+    const c = $('#lg-clock'); if (!c) return clearInterval(S.lgTimer);
+    const n = new Date(); c.textContent = n.toLocaleTimeString('pt-BR');
+    $('#lg-date').textContent = n.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  };
+  clearInterval(S.lgTimer); tick(); S.lgTimer = setInterval(tick, 1000);
   $$('.lg-tabs button').forEach(b => b.onclick = () => { if (b.dataset.mode !== mode) renderLogin(b.dataset.mode); });
   const eye = $('.lg-eye'); eye.onclick = () => {
     const i = $('#f-pass'), show = i.type === 'password'; i.type = show ? 'text' : 'password';

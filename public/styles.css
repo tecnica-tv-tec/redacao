@@ -41,18 +41,18 @@ a { color: var(--blue); }
 .lg-rings .r3 { stroke: rgba(255,255,255,.18); stroke-width: 10; stroke-dasharray: 640 303; animation: lgSpin 40s linear infinite; }
 @keyframes lgSpin { to { transform: rotate(360deg); } }
 .lg-stage-in { position: relative; max-width: 520px; }
-.lg-live { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 99px; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase;
-  background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.16); }
-.lg-live i { width: 8px; height: 8px; border-radius: 50%; background: #ff5a5f; box-shadow: 0 0 10px #ff5a5f; animation: lgBlink 1.8s ease-in-out infinite; }
-@keyframes lgBlink { 50% { opacity: .35; } }
-.lg-stage h2 { font-size: clamp(30px, 3.6vw, 52px); line-height: 1.1; letter-spacing: -.02em; margin: 22px 0 14px; font-weight: 700; }
-.lg-stage h2 em { font-style: normal; color: var(--teal); }
-.lg-stage p { font-size: 16px; line-height: 1.6; color: #c5d5ea; margin: 0 0 30px; max-width: 440px; }
-.lg-stage ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; max-width: 440px; }
-.lg-stage li { display: flex; gap: 14px; align-items: flex-start; padding: 12px 16px; border-radius: 12px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); backdrop-filter: blur(8px); }
-.lg-stage li span { width: 4px; align-self: stretch; border-radius: 4px; background: var(--teal); }
-.lg-stage li b { display: block; font-size: 14px; }
-.lg-stage li small { color: #b6c8e0; font-size: 12.5px; }
+.lg-kicker { display: inline-flex; align-items: center; gap: 12px; font-size: 12px; font-weight: 600; letter-spacing: .2em; text-transform: uppercase; color: var(--teal); }
+.lg-kicker::before { content: ""; width: 36px; height: 2px; background: var(--teal); }
+.lg-stage h2 { font-size: clamp(30px, 3.4vw, 48px); line-height: 1.12; letter-spacing: -.015em; margin: 20px 0 16px; font-weight: 600; max-width: 12em; }
+.lg-stage p { margin: 0; font-size: 15.5px; line-height: 1.65; color: #b9cbe3; max-width: 26em; }
+.lg-base { position: absolute; left: clamp(32px, 6vw, 96px); right: clamp(32px, 6vw, 96px); bottom: 32px; }
+.lg-flow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; list-style: none; margin: 0 0 22px; padding: 0; }
+.lg-flow li { border-top: 1px solid rgba(255,255,255,.25); padding-top: 10px; font-size: 13px; font-weight: 600; }
+.lg-flow li span { display: block; font: 600 11px var(--mono); color: var(--teal); margin-bottom: 3px; }
+.lg-now { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 12px; color: #93abcb; }
+.lg-now span::first-letter { text-transform: uppercase; }
+.lg-now span { display: inline-block; }
+.lg-now b { font: 600 14px var(--mono); color: #fff; font-variant-numeric: tabular-nums; }
 .lg-panel { display: flex; flex-direction: column; align-items: center; padding: 28px 24px 16px; color: var(--ink); color-scheme: light; overflow: auto;
   background: radial-gradient(600px 300px at 100% 0%, rgba(0,189,160,.1), transparent 70%), #f5f8fb; }
 .lg-card { width: 100%; max-width: 400px; margin: auto 0; }
@@ -90,12 +90,13 @@ a { color: var(--blue); }
 .lg button:focus-visible, .lg a:focus-visible { outline: 3px solid var(--teal); outline-offset: 2px; }
 .lg-note { margin: 14px 0 0; text-align: center; font-size: 12.5px; color: var(--soft); line-height: 1.5; }
 .lg-foot { margin-top: 16px; font-size: 11.5px; color: #75859c; letter-spacing: .04em; }
+@media (min-width: 901px) and (max-height: 620px) { .lg-now { display: none; } .lg-stage { align-items: flex-start; padding-top: 40px; } .lg-base { bottom: 20px; } }
 @media (max-width: 900px) {
   .lg { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   .lg-stage { padding: 22px 24px; }
-  .lg-stage h2 { font-size: 24px; margin: 12px 0 0; }
-  .lg-stage h2 br { display: none; }
-  .lg-stage p, .lg-stage ul { display: none; }
+  .lg-kicker { font-size: 10px; }
+  .lg-stage h2 { font-size: 21px; margin: 10px 0 0; }
+  .lg-stage p, .lg-base { display: none; }
   .lg-rings { width: 360px; right: -140px; }
   .lg-panel { overflow: visible; }
   .lg-logo { width: 170px; }
