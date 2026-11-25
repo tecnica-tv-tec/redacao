@@ -4,14 +4,14 @@
 'use strict';
 
 window.createSupabaseAdapter = function (sb) {
-  const ROLES = ['admin', 'chefe', 'editor', 'produtor', 'reporter', 'apresentador'];
-  const ROLE_LABEL = { admin: 'Administrador', chefe: 'Chefe de reportagem', editor: 'Editor', produtor: 'Produtor', reporter: 'Repórter', apresentador: 'Apresentador' };
+  const ROLES = ['admin', 'chefe', 'editor', 'produtor', 'reporter', 'apresentador', 'editor_imagem'];
+  const ROLE_LABEL = { admin: 'Administrador', chefe: 'Chefe de reportagem', editor: 'Editor', produtor: 'Produtor', reporter: 'Repórter', apresentador: 'Apresentador', editor_imagem: 'Editor de imagens' };
   const CAN = {
     manageUsers: ['admin'], managePrograms: ['admin', 'chefe'],
     editRundown: ROLES, approveRundown: ['admin', 'chefe', 'editor'], deletePauta: ['admin', 'chefe', 'produtor'],
   };
   const PAUTA_FIELDS = ['retranca', 'data', 'editoria', 'status', 'prioridade', 'programaId', 'formato', 'produtorId', 'reporterId', 'reporterNome', 'cinegrafista', 'motorista', 'editorTexto',
-    'horario', 'local', 'endereco', 'proposta', 'historico', 'encaminhamento', 'perguntas', 'imagens', 'arte', 'observacoes', 'entrevistados', 'roteiro', 'tags', 'materia', 'materiaStatus', 'motivoQueda'];
+    'horario', 'local', 'endereco', 'proposta', 'historico', 'encaminhamento', 'perguntas', 'imagens', 'arte', 'observacoes', 'entrevistados', 'roteiro', 'tags', 'materia', 'materiaStatus', 'motivoQueda', 'edicaoStatus', 'edicaoEditor', 'edicaoObs'];
   const ITEM_FIELDS = ['retranca', 'tipo', 'apresentador', 'reporter', 'editor', 'cabeca', 'deixa', 'texto', 'gc', 'tempoVT', 'tempoCabManual', 'status', 'obs', 'pautaId', 'flagged', 'pagina'];
   const PROGRAM_FIELDS = ['name', 'sigla', 'inicio', 'duracao', 'wpm', 'apresentadores', 'ativo'];
 

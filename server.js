@@ -45,12 +45,12 @@ function checkPassword(pw, stored) {
 }
 
 // ---------------------------------------------------------------- domínio
-const ROLES = ['admin', 'chefe', 'editor', 'produtor', 'reporter', 'apresentador'];
-const ROLE_LABEL = { admin: 'Administrador', chefe: 'Chefe de reportagem', editor: 'Editor', produtor: 'Produtor', reporter: 'Repórter', apresentador: 'Apresentador' };
+const ROLES = ['admin', 'chefe', 'editor', 'produtor', 'reporter', 'apresentador', 'editor_imagem'];
+const ROLE_LABEL = { admin: 'Administrador', chefe: 'Chefe de reportagem', editor: 'Editor', produtor: 'Produtor', reporter: 'Repórter', apresentador: 'Apresentador', editor_imagem: 'Editor de imagens' };
 const CAN = {
   manageUsers: ['admin'],
   managePrograms: ['admin', 'chefe'],
-  editRundown: ['admin', 'chefe', 'editor', 'produtor', 'reporter', 'apresentador'],
+  editRundown: ['admin', 'chefe', 'editor', 'produtor', 'reporter', 'apresentador', 'editor_imagem'],
   approveRundown: ['admin', 'chefe', 'editor'],
   deletePauta: ['admin', 'chefe', 'produtor'],
 };
@@ -59,7 +59,7 @@ const can = (user, perm) => CAN[perm].includes(user.role);
 const PAUTA_FIELDS = ['retranca', 'data', 'editoria', 'status', 'prioridade', 'programaId', 'formato',
   'produtorId', 'reporterId', 'reporterNome', 'cinegrafista', 'motorista', 'editorTexto', 'horario', 'local', 'endereco',
   'proposta', 'historico', 'encaminhamento', 'perguntas', 'imagens', 'arte', 'observacoes', 'entrevistados', 'roteiro', 'tags',
-  'materia', 'materiaStatus', 'motivoQueda'];
+  'materia', 'materiaStatus', 'motivoQueda', 'edicaoStatus', 'edicaoEditor', 'edicaoObs'];
 // busca sem diferenciar acentos e maiúsculas
 const fold = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 function pautaSearchText(p) {
@@ -114,6 +114,7 @@ function seedDemo() {
   const rep2 = mk('Ricardo Alves', 'reporter2@demo.local', 'reporter');
   const ed = mk('Marina Souza', 'editor@demo.local', 'editor');
   mk('Roberto Campos', 'apresentador@demo.local', 'apresentador');
+  mk('Thiago Rocha', 'imagem@demo.local', 'editor_imagem');
   const today = new Date().toISOString().slice(0, 10);
   const jn = db.programs.find(p => p.orgId === org.id && p.sigla === 'JN');
   jn.apresentadores = 'Roberto Campos';

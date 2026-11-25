@@ -254,6 +254,22 @@ mark { background: #6b5310; color: #fff; border-radius: 2px; padding: 0 1px; }
 @media (max-width: 1100px) { .gsearch { display: none; } }
 
 .draftbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* ---------- Edição de imagens ---------- */
+.ws-edicao .mf-filters select { width: 100%; }
+table.edscript { width: calc(100% - 36px); margin: 8px 18px; border-collapse: collapse; }
+.edscript th { text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--line-2); }
+.edscript td { padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.edscript td:first-child { width: 28px; color: var(--muted); }
+.edscript td:nth-child(2) { width: 150px; border-left: 3px solid var(--line-2); }
+.edscript .edtxt { white-space: pre-wrap; font-size: 15px; line-height: 1.6; }
+.edscript .num { text-align: right; white-space: nowrap; color: var(--muted); }
+.edscript tr.ed-off td:nth-child(2) { border-left-color: #3987e5; }
+.edscript tr.ed-son td:nth-child(2) { border-left-color: #d95926; } .edscript tr.ed-son .edtxt { font-style: italic; }
+.edscript tr.ed-pas td:nth-child(2) { border-left-color: #199e70; } .edscript tr.ed-pas .edtxt { font-style: italic; }
+.edscript tr.ed-gc td:nth-child(2), .edscript tr.ed-arte td:nth-child(2), .edscript tr.ed-img td:nth-child(2), .edscript tr.ed-tri td:nth-child(2) { border-left-color: var(--accent); }
+.gclist { margin: 4px 0 0; padding-left: 18px; line-height: 1.7; }
+.edbox { background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; }
+
 /* queda da pauta */
 .quedabox { margin-top: 8px; padding: 10px 12px 4px; border: 1px solid rgba(230, 103, 103, .45); border-radius: 6px; background: rgba(230, 103, 103, .06); }
 .quedabox .formbar { flex-wrap: wrap; gap: 4px; }

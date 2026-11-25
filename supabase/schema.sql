@@ -109,6 +109,17 @@ alter table public.pautas add column if not exists materia_at       timestamptz;
 -- EQUIPE da pauta: repórter digitado (quando não é usuário do sistema) e motorista
 alter table public.pautas add column if not exists reporter_nome    text not null default '';
 alter table public.pautas add column if not exists motorista        text not null default '';
+-- EDIÇÃO DE IMAGENS: andamento da edição do VT
+alter table public.pautas add column if not exists edicao_status    text not null default '';
+alter table public.pautas add column if not exists edicao_editor    text not null default '';
+alter table public.pautas add column if not exists edicao_obs       text not null default '';
+-- função "Editor de imagens"
+alter table public.profiles drop constraint if exists profiles_role_check;
+alter table public.profiles add constraint profiles_role_check
+  check (role in ('admin','chefe','editor','produtor','reporter','apresentador','editor_imagem'));
+alter table public.invites drop constraint if exists invites_role_check;
+alter table public.invites add constraint invites_role_check
+  check (role in ('admin','chefe','editor','produtor','reporter','apresentador','editor_imagem'));
 -- QUEDA: justificativa obrigatória quando a pauta cai
 alter table public.pautas add column if not exists motivo_queda     text not null default '';
 -- HISTÓRICO DE STATUS (relatório de tempo de produção): [{status, at, by}]

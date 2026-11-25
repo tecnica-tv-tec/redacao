@@ -178,10 +178,10 @@ async function boot() {
   [S.users, S.programs] = await Promise.all([api('GET', '/api/users'), api('GET', '/api/programs')]);
   if (!S.rd.programId && S.programs.length) S.rd.programId = S.programs[0].id;
   renderShell();
-  go((location.hash || '#pautas').slice(1));
+  go((location.hash || (S.me.role === 'editor_imagem' ? '#edicao' : '#pautas')).slice(1));
 }
 function renderShell() {
-  const nav = [['pautas', 'Pautas'], ['materias', 'Matérias'], ['calendario', 'Calendário'], ['espelho', 'Espelho'], ['busca', 'Busca'], ['relatorios', 'Relatórios'], ['programas', 'Telejornais'], ['equipe', 'Equipe'], ['log', 'Atividade']];
+  const nav = [['pautas', 'Pautas'], ['materias', 'Matérias'], ['edicao', 'Edição'], ['calendario', 'Calendário'], ['espelho', 'Espelho'], ['busca', 'Busca'], ['relatorios', 'Relatórios'], ['programas', 'Telejornais'], ['equipe', 'Equipe'], ['log', 'Atividade']];
   $('#app').innerHTML = `
   <div class="shell">
     <header class="topbar">
@@ -232,7 +232,7 @@ function changePassword() {
 }
 
 async function go(view) {
-  if (!['pautas', 'materias', 'calendario', 'espelho', 'busca', 'relatorios', 'programas', 'equipe', 'log'].includes(view)) view = 'pautas';
+  if (!['pautas', 'materias', 'edicao', 'calendario', 'espelho', 'busca', 'relatorios', 'programas', 'equipe', 'log'].includes(view)) view = 'pautas';
   if (S.view !== view) {
     if (S.pautaDirty && !(await autosavePauta()) && !confirm('A pauta ainda não pôde ser salva no sistema (veja o aviso ao lado de Salvar). Ela fica guardada como rascunho neste navegador. Sair mesmo assim?')) return;
     clearTimeout(S.pAutoTimer);
@@ -245,7 +245,7 @@ async function go(view) {
   S.view = view; history.replaceState(null, '', '#' + view);
   $$('[data-go]').forEach(b => b.classList.toggle('on', b.dataset.go === view));
   stopPolling();
-  ({ pautas: viewPautas, materias: viewMaterias, calendario: viewCalendario, espelho: viewEspelho, busca: viewBusca, relatorios: viewRelatorios, programas: viewProgramas, equipe: viewEquipe, log: viewLog })[view]();
+  ({ pautas: viewPautas, materias: viewMaterias, edicao: viewEdicao, calendario: viewCalendario, espelho: viewEspelho, busca: viewBusca, relatorios: viewRelatorios, programas: viewProgramas, equipe: viewEquipe, log: viewLog })[view]();
 }
 window.addEventListener('hashchange', () => { const v = location.hash.slice(1); if (S.me && v && v !== S.view) go(v); });
 function stopPolling() { clearInterval(S.pollTimer); S.pollTimer = null; }
@@ -1572,6 +1572,142 @@ async function saveMateria(showToast) {
     if (e.status === 409 && confirm(e.message + '\n\nSobrescrever com o seu texto?')) { p.force = true; return saveMateria(showToast); }
     toast(e.message, true); return false;
   }
+}
+
+// =============================================================== EDIÇÃO (editor de imagens)
+const EDICAO_STATUS = [['', 'A editar'], ['em_edicao', 'Em edição'], ['editada', 'Editada'], ['aprovada', 'Aprovada']];
+const ED_CLASS = { '': 'sugestao', em_edicao: 'em_producao', editada: 'pronta', aprovada: 'gravada' };
+const edPill = (p) => `<span class="pill st-${ED_CLASS[p.edicaoStatus || ''] || 'sugestao'}">${esc(label(EDICAO_STATUS, p.edicaoStatus || ''))}</span>`;
+async function loadEdicao() {
+  const f = S.ef; const q = new URLSearchParams();
+  if (!f.allDates) { q.set('from', f.date); q.set('to', f.date); }
+  if (f.q) q.set('q', f.q);
+  if (f.comMateria) q.set('comMateria', '1');
+  let list = await api('GET', '/api/pautas?' + q);
+  list = list.filter(p => p.status !== 'caiu' && (!f.situacao || (f.situacao === 'aeditar' ? !p.edicaoStatus : p.edicaoStatus === f.situacao)));
+  S.edList = list;
+}
+async function viewEdicao() {
+  S.ef = Object.assign({ date: today(), allDates: false, q: '', comMateria: true, situacao: '' }, S.ef || {});
+  const f = S.ef;
+  $('#main').innerHTML = `
+  <div class="workspace ws-materias ws-edicao">
+    <section class="pane"><div class="pane-h"><h2>Edição de imagens</h2><span class="hint" id="ef-label"></span></div>
+      <div class="pad mf-filters">
+        <div class="datenav"><button class="btn sm" data-d="-1" aria-label="Dia anterior">‹</button><input type="date" id="ef-date" value="${f.date}"><button class="btn sm" data-d="1" aria-label="Próximo dia">›</button><button class="btn sm" id="ef-today">Hoje</button></div>
+        <input type="search" id="ef-q" value="${esc(f.q)}" placeholder="Buscar retranca, repórter, trecho do texto…">
+        <select id="ef-sit"><option value="">Toda situação de edição</option>${opts(EDICAO_STATUS.map(([k, l]) => [k || 'aeditar', l]), f.situacao)}</select>
+        <div class="mf-checks">
+          <label class="check"><input type="checkbox" id="ef-all" ${f.allDates ? 'checked' : ''}> Todas as datas</label>
+          <label class="check"><input type="checkbox" id="ef-com" ${f.comMateria ? 'checked' : ''}> Só com texto do repórter</label>
+        </div>
+      </div>
+      <div class="pane-b" id="ed-list"></div></section>
+    <section class="pane mat-editor" id="ed-main"></section>
+    <aside class="pane mat-ref" id="ed-ref"></aside>
+  </div>`;
+  const reload = async () => { await loadEdicao(); renderEdList(); };
+  const setDate = (d) => { f.allDates = false; $('#ef-all').checked = false; f.date = d; $('#ef-date').value = d; reload(); };
+  $('#ef-date').onchange = e => setDate(e.target.value || today());
+  $$('.mf-filters [data-d]').forEach(b => b.onclick = () => setDate(addDays(f.date, +b.dataset.d)));
+  $('#ef-today').onclick = () => setDate(today());
+  $('#ef-all').onchange = e => { f.allDates = e.target.checked; reload(); };
+  $('#ef-com').onchange = e => { f.comMateria = e.target.checked; reload(); };
+  $('#ef-sit').onchange = e => { f.situacao = e.target.value; reload(); };
+  let qt; $('#ef-q').oninput = e => { clearTimeout(qt); qt = setTimeout(() => { f.q = e.target.value.trim(); reload(); }, 300); };
+  $('#ed-list').onclick = e => { const r = e.target.closest('[data-id]'); if (r) openEdicao(r.dataset.id); };
+  await reload();
+  const want = S.edOpen && S.edOpen.id; if (want) await openEdicao(want); else renderEdicao();
+  S.pollTimer = setInterval(async () => { if (S.view !== 'edicao') return; try { await loadEdicao(); renderEdList(); } catch { } }, 10000);
+}
+function renderEdList() {
+  const el = $('#ed-list'); if (!el) return;
+  $('#ef-label').textContent = S.ef.allDates ? 'todas as datas' : `${weekday(S.ef.date)}, ${fmtDate(S.ef.date)}`;
+  const L = S.edList || [];
+  if (!L.length) { el.innerHTML = `<div class="empty">Nenhuma matéria para editar neste filtro.${S.ef.comMateria ? '<br><br><span class="hint">Desmarque “Só com texto do repórter” para ver todas as pautas.</span>' : ''}</div>`; return; }
+  const selId = S.edOpen && S.edOpen.id;
+  el.innerHTML = L.map(p => {
+    const w = wordCount(p.materia);
+    return `<div class="matrow ${p.id === selId ? 'sel' : ''}" data-id="${p.id}">
+      <div class="mr-top"><span class="retr">${esc(p.retranca)}</span><span class="grow"></span>${edPill(p)}</div>
+      <div class="mr-sub">${S.ef.allDates ? fmtDate(p.data) + ' · ' : ''}${esc(repName(p) || 'sem repórter')} · <span class="tipo">${esc(p.formato || '')}</span>${w ? ` · texto ${materiaPill(p)}` : ' · <i>sem texto</i>'}${p.edicaoEditor ? ' · ✂ ' + esc(p.edicaoEditor) : ''}</div>
+    </div>`;
+  }).join('');
+}
+async function openEdicao(id) {
+  try { S.edOpen = await api('GET', '/api/pautas/' + id); } catch (e) { S.edOpen = null; toast(e.message, true); }
+  renderEdList(); renderEdicao();
+}
+// roteiro de edição: blocos numerados da matéria, com tempo estimado de cada trecho e acumulado
+function roteiroEdicao(p) {
+  const rows = parseScript(p.materia); let acc = 0;
+  return rows.map((r, i) => {
+    const t = readSec(r.body, 170); acc += t;
+    const tipo = (r.tag || 'TEXTO').split(/\s/)[0];
+    return Object.assign({}, r, { n: i + 1, t, acc, tipo, cls: ({ OFF: 'off', SONORA: 'son', PASSAGEM: 'pas', GC: 'gc', ARTE: 'arte', TRILHA: 'tri', IMAGEM: 'img' })[tipo] || 'txt' });
+  });
+}
+function renderEdicao() {
+  const el = $('#ed-main'), ref = $('#ed-ref'); if (!el) return;
+  const p = S.edOpen;
+  if (!p) {
+    el.innerHTML = `<div class="pane-h"><h2>Roteiro de edição</h2></div><div class="empty">Escolha uma matéria na lista para ver o texto do repórter organizado para a edição.</div>`;
+    ref.innerHTML = `<div class="pane-h"><h2>Pauta</h2></div><div class="empty hint">Imagens, arte, equipe e observações da pauta aparecem aqui.</div>`;
+    return;
+  }
+  const prog = p.programaId ? (S.programs.find(x => x.id === p.programaId) || {}).name || '' : '';
+  const R = roteiroEdicao(p);
+  const gcs = R.filter(r => r.tipo === 'GC' || r.tipo === 'SONORA' || r.tipo === 'PASSAGEM').map(r => r.sub || r.body.split('\n')[0]).filter(Boolean);
+  const total = R.reduce((a, r) => a + r.t, 0);
+  el.innerHTML = `
+    <div class="pane-h"><h2>Roteiro de edição</h2><div style="flex:1"></div>
+      <button class="btn sm" id="ed-gc" ${gcs.length ? '' : 'disabled'}>Copiar GCs</button>
+      <button class="btn sm" id="ed-print">Imprimir / PDF</button></div>
+    <div class="pane-b">
+    <div class="mat-head">
+      <div class="mat-retr">${esc(p.retranca)}</div>
+      <div class="hint">${p.data ? `${esc(weekday(p.data))}, ${fmtDate(p.data)}` : ''}${prog ? ' · ' + esc(prog) : ''} · ${esc(p.formato || '')} · Repórter: <b>${esc(repName(p) || '—')}</b>${p.cinegrafista ? ' · Imagens: <b>' + esc(p.cinegrafista) + '</b>' : ''}</div>
+      <div class="hint" style="margin-top:4px">Texto: ${materiaPill(p)} ${p.materiaAutorId ? `· última alteração de ${esc(userName(p.materiaAutorId))} em ${fmtDT(p.materiaAt)}` : ''} · ${R.length} bloco(s) · tempo estimado de texto <b>${fmtDur(total)}</b></div>
+    </div>
+    ${R.length ? `<table class="edscript"><thead><tr><th>#</th><th>Marcação</th><th>Texto do repórter</th><th class="num">Tempo</th><th class="num">Acum.</th></tr></thead><tbody>
+      ${R.map(r => `<tr class="ed-${r.cls}"><td class="mono">${r.n}</td><td><b>${esc(r.tag || 'TEXTO')}</b>${r.sub ? `<div class="hint">${esc(r.sub)}</div>` : ''}</td><td class="edtxt">${esc(r.body) || '<span class="hint">—</span>'}</td><td class="num mono">${r.t ? '~' + fmtDur(r.t) : ''}</td><td class="num mono">${fmtDur(r.acc)}</td></tr>`).join('')}
+    </tbody></table>
+    <p class="hint" style="padding:0 18px">Tempos estimados pela leitura (170 palavras/min). Sonoras e passagens dependem da gravação.</p>`
+    : `<div class="empty">O repórter ainda não escreveu o texto desta matéria.<br><br><span class="hint">Quando ele escrever em Matérias, o roteiro aparece aqui automaticamente.</span></div>`}
+    ${gcs.length ? `<div class="pad"><div class="ref-t">GCs (caracteres)</div><ul class="gclist">${gcs.map(g => `<li>${esc(g)}</li>`).join('')}</ul></div>` : ''}
+    </div>`;
+
+  const blk = (t, v) => String(v || '').trim() ? `<div class="ref-b"><div class="ref-t">${t}</div><div class="ref-x">${esc(v)}</div></div>` : '';
+  const rot = (p.roteiro || []).filter(r => r.local || r.acao);
+  const ents = (p.entrevistados || []).filter(e => e.nome);
+  const isEd = S.me.role === 'editor_imagem';
+  ref.innerHTML = `<div class="pane-h"><h2>Edição</h2><span class="savestate" id="edstate">Salva</span></div><div class="pane-b pad">
+    <div class="edbox">
+      <div class="field"><label>Situação da edição</label><select id="ed-st">${opts(EDICAO_STATUS, p.edicaoStatus || '')}</select></div>
+      <div class="field"><label>Editor(a) de imagens</label><input type="text" id="ed-ed" list="dl-edimg" value="${esc(p.edicaoEditor || '')}" placeholder="${isEd ? esc(S.me.name) : 'Nome de quem edita'}">
+        <datalist id="dl-edimg">${S.users.filter(u => u.role === 'editor_imagem' && u.active).map(u => `<option value="${esc(u.name)}"></option>`).join('')}</datalist></div>
+      <div class="field"><label>Observações da edição</label><textarea id="ed-obs" rows="3" placeholder="Ex.: falta imagem aérea; sonora 2 com ruído; usar arte do cronograma…">${esc(p.edicaoObs || '')}</textarea></div>
+      <button class="btn primary sm" id="ed-save">Salvar edição</button>
+    </div>
+    ${blk('Imagens necessárias', p.imagens)}${blk('Pedido de arte', p.arte)}
+    ${rot.length ? `<div class="ref-b"><div class="ref-t">Roteiro de gravação</div>${rot.map(r => `<div class="ref-ent"><b>${esc(r.hora || '')}</b> ${esc(r.local || '')}<div class="hint">${esc(r.acao || '')}</div></div>`).join('')}</div>` : ''}
+    ${ents.length ? `<div class="ref-b"><div class="ref-t">Entrevistados</div>${ents.map(e => `<div class="ref-ent"><b>${esc(e.nome)}</b>${e.funcao ? ' · ' + esc(e.funcao) : ''}</div>`).join('')}</div>` : ''}
+    ${blk('Encaminhamento', p.encaminhamento)}${blk('Proposta', p.proposta)}${blk('Observações da pauta', p.observacoes)}
+  </div>`;
+
+  $('#ed-print').onclick = () => printPauta(p, String(p.materia || '').trim() ? 'materia' : 'pauta');
+  $('#ed-gc').onclick = async () => { try { await navigator.clipboard.writeText(gcs.join('\n')); toast('GCs copiados.'); } catch { toast('Não foi possível copiar.', true); } };
+  const dirty = () => { const s = $('#edstate'); s.textContent = 'Alterações não salvas'; s.classList.add('dirty'); };
+  ['#ed-st', '#ed-ed', '#ed-obs'].forEach(s => $(s).addEventListener('input', dirty));
+  $('#ed-st').addEventListener('change', () => { if (isEd && !$('#ed-ed').value.trim() && $('#ed-st').value) $('#ed-ed').value = S.me.name; });
+  $('#ed-save').onclick = async () => {
+    try {
+      const saved = await api('PUT', '/api/pautas/' + p.id, { edicaoStatus: $('#ed-st').value, edicaoEditor: $('#ed-ed').value.trim(), edicaoObs: $('#ed-obs').value, updatedAt: p.updatedAt });
+      Object.assign(p, { edicaoStatus: saved.edicaoStatus, edicaoEditor: saved.edicaoEditor, edicaoObs: saved.edicaoObs, updatedAt: saved.updatedAt });
+      const s = $('#edstate'); s.textContent = 'Salva'; s.classList.remove('dirty'); toast('Edição salva.');
+      const li = (S.edList || []).find(x => x.id === p.id); if (li) Object.assign(li, { edicaoStatus: p.edicaoStatus, edicaoEditor: p.edicaoEditor }); renderEdList();
+    } catch (e) { toast(e.status === 409 ? 'A pauta foi alterada por outra pessoa. Abra de novo e salve.' : e.message, true); }
+  };
 }
 
 // =============================================================== RELATÓRIOS (produção por período)
