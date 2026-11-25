@@ -26,17 +26,83 @@ button, input, select, textarea { font: inherit; color: inherit; }
 a { color: var(--blue); }
 .hidden { display: none !important; }
 
-/* ---------- login ---------- */
-.login-wrap { min-height: 100vh; display: grid; place-items: center; padding: 16px; overflow: auto; height: 100vh;
-  background: radial-gradient(1200px 600px at 20% -10%, #24303f 0%, transparent 60%), var(--bg); }
-.login-card { width: 100%; max-width: 400px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 28px; }
+/* ---------- login (identidade FTV Tec: marinho #003265 + turquesa #00bda0) ---------- */
+.lg { --navy: #003265; --navy-d: #00142c; --teal: #00bda0; --teal-d: #007a68; --ink: #0c1f38; --soft: #5b6b82;
+  display: grid; grid-template-columns: 1.15fr 1fr; height: 100vh; overflow: auto; background: #f5f8fb; }
+.lg-stage { position: relative; overflow: hidden; display: flex; align-items: center; padding: 48px clamp(32px, 6vw, 96px); color: #fff;
+  background: radial-gradient(700px 500px at 100% 100%, rgba(0,189,160,.28), transparent 65%), linear-gradient(150deg, var(--navy-d), var(--navy) 85%); }
+.lg-stage::before { content: ""; position: absolute; inset: 0; opacity: .5;
+  background-image: linear-gradient(rgba(255,255,255,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.05) 1px, transparent 1px);
+  background-size: 44px 44px; mask-image: radial-gradient(circle at 30% 40%, #000, transparent 75%); }
+.lg-rings { position: absolute; width: min(820px, 105%); right: -38%; top: 50%; translate: 0 -50%; fill: none; pointer-events: none; }
+.lg-rings circle { transform-origin: 300px 300px; stroke-linecap: round; }
+.lg-rings .r1 { stroke: rgba(255,255,255,.12); stroke-width: 2; stroke-dasharray: 1100 660; animation: lgSpin 60s linear infinite; }
+.lg-rings .r2 { stroke: var(--teal); stroke-width: 26; stroke-dasharray: 260 1091; opacity: .75; animation: lgSpin 26s linear infinite reverse; }
+.lg-rings .r3 { stroke: rgba(255,255,255,.18); stroke-width: 10; stroke-dasharray: 640 303; animation: lgSpin 40s linear infinite; }
+@keyframes lgSpin { to { transform: rotate(360deg); } }
+.lg-stage-in { position: relative; max-width: 520px; }
+.lg-live { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 99px; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase;
+  background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.16); }
+.lg-live i { width: 8px; height: 8px; border-radius: 50%; background: #ff5a5f; box-shadow: 0 0 10px #ff5a5f; animation: lgBlink 1.8s ease-in-out infinite; }
+@keyframes lgBlink { 50% { opacity: .35; } }
+.lg-stage h2 { font-size: clamp(30px, 3.6vw, 52px); line-height: 1.1; letter-spacing: -.02em; margin: 22px 0 14px; font-weight: 700; }
+.lg-stage h2 em { font-style: normal; color: var(--teal); }
+.lg-stage p { font-size: 16px; line-height: 1.6; color: #c5d5ea; margin: 0 0 30px; max-width: 440px; }
+.lg-stage ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; max-width: 440px; }
+.lg-stage li { display: flex; gap: 14px; align-items: flex-start; padding: 12px 16px; border-radius: 12px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); backdrop-filter: blur(8px); }
+.lg-stage li span { width: 4px; align-self: stretch; border-radius: 4px; background: var(--teal); }
+.lg-stage li b { display: block; font-size: 14px; }
+.lg-stage li small { color: #b6c8e0; font-size: 12.5px; }
+.lg-panel { display: flex; flex-direction: column; align-items: center; padding: 28px 24px 16px; color: var(--ink); color-scheme: light; overflow: auto;
+  background: radial-gradient(600px 300px at 100% 0%, rgba(0,189,160,.1), transparent 70%), #f5f8fb; }
+.lg-card { width: 100%; max-width: 400px; margin: auto 0; }
+.lg-logo { display: block; width: 210px; height: auto; margin: 0 auto 18px; }
+.lg-card h1 { font-size: 25px; letter-spacing: -.01em; margin: 0 0 4px; text-align: center; color: var(--navy); }
+.lg-sub { margin: 0 0 20px; text-align: center; color: var(--soft); font-size: 14px; }
+.lg-tabs { position: relative; display: grid; grid-template-columns: 1fr 1fr; padding: 4px; border-radius: 12px; background: #e6edf5; margin-bottom: 18px; }
+.lg-tabs button { border: 0; background: transparent; padding: 9px; border-radius: 9px; cursor: pointer; color: var(--soft); font-weight: 600; font-size: 13px; }
+.lg-tabs button.on { background: #fff; color: var(--navy); box-shadow: 0 1px 3px rgba(0,30,70,.16); }
+.lg-field { margin-bottom: 14px; }
+.lg-field label { display: block; font-size: 12.5px; font-weight: 600; color: var(--ink); margin-bottom: 6px; }
+.lg-input { position: relative; display: flex; align-items: center; }
+.lg-input > svg { position: absolute; left: 14px; width: 18px; height: 18px; fill: none; stroke: #7d8ea6; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; transition: stroke .15s; }
+.lg .lg-input input { height: 46px; width: 100%; padding: 0 44px; font-size: 14px; color: var(--ink); background: #fff; border: 1px solid #cdd8e6; border-radius: 12px; transition: border-color .15s, box-shadow .15s; }
+.lg .lg-input input::placeholder { color: #93a1b5; }
+.lg .lg-input input:focus { border-color: var(--teal-d); box-shadow: 0 0 0 4px rgba(0,189,160,.2); }
+.lg-input:focus-within > svg { stroke: var(--teal-d); }
+.lg-eye { position: absolute; right: 6px; width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; cursor: pointer; }
+.lg-eye svg { width: 18px; height: 18px; fill: none; stroke: #7d8ea6; stroke-width: 1.6; }
+.lg-eye:hover { background: #eef3f9; } .lg-eye[aria-pressed=true] svg { stroke: var(--teal-d); }
+.lg-help { display: block; margin-top: 5px; font-size: 12px; color: var(--soft); }
+.lg-forgot { text-align: right; margin-top: -6px; }
+.lg-forgot a { color: var(--teal-d); font-size: 12.5px; font-weight: 600; text-decoration: none; }
+.lg-forgot a:hover { text-decoration: underline; }
+.lg .err { color: #c0262c; font-size: 13px; text-align: center; margin: 8px 0; }
+.lg .err.ok { color: var(--teal-d); }
+.lg-submit { width: 100%; height: 48px; display: flex; align-items: center; justify-content: center; gap: 10px; border: 0; border-radius: 12px; cursor: pointer; color: #fff; font-weight: 700; font-size: 15px;
+  background: linear-gradient(100deg, var(--navy), #05518c 60%, var(--teal-d)); box-shadow: 0 10px 24px -10px rgba(0,50,101,.7); transition: transform .15s, box-shadow .15s, filter .15s; }
+.lg-submit svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; transition: translate .15s; }
+.lg-submit:hover { filter: brightness(1.1); transform: translateY(-1px); box-shadow: 0 14px 28px -10px rgba(0,50,101,.75); }
+.lg-submit:hover svg { translate: 3px 0; }
+.lg-submit:disabled { cursor: wait; opacity: .85; transform: none; }
+.lg-submit.busy svg { width: 16px; height: 16px; border-radius: 50%; border: 2px solid rgba(255,255,255,.35); border-top-color: #fff; animation: lgSpin .7s linear infinite; }
+.lg-submit.busy svg path { display: none; }
+.lg button:focus-visible, .lg a:focus-visible { outline: 3px solid var(--teal); outline-offset: 2px; }
+.lg-note { margin: 14px 0 0; text-align: center; font-size: 12.5px; color: var(--soft); line-height: 1.5; }
+.lg-foot { margin-top: 16px; font-size: 11.5px; color: #75859c; letter-spacing: .04em; }
+@media (max-width: 900px) {
+  .lg { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .lg-stage { padding: 22px 24px; }
+  .lg-stage h2 { font-size: 24px; margin: 12px 0 0; }
+  .lg-stage h2 br { display: none; }
+  .lg-stage p, .lg-stage ul { display: none; }
+  .lg-rings { width: 360px; right: -140px; }
+  .lg-panel { overflow: visible; }
+  .lg-logo { width: 170px; }
+}
+@media (prefers-reduced-motion: reduce) { .lg *, .lg *::before { animation: none !important; transition: none !important; } }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: .08em; }
 .brand .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--red); box-shadow: 0 0 10px var(--red); }
-.login-card h1 { font-size: 22px; margin: 18px 0 4px; }
-.login-card p.sub { color: var(--muted); margin: 0 0 18px; }
-.tabs { display: flex; gap: 4px; background: var(--bg); padding: 4px; border-radius: 8px; margin-bottom: 16px; }
-.tabs button { flex: 1; border: 0; background: transparent; padding: 8px; border-radius: 6px; cursor: pointer; color: var(--muted); }
-.tabs button.on { background: var(--panel-3); color: var(--text); }
 .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
 .field label, .lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
 input[type=text], input[type=email], input[type=password], input[type=date], input[type=time], input[type=number], input[type=search], select, textarea {

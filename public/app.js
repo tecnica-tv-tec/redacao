@@ -130,45 +130,78 @@ const repName = (p) => userName(p.reporterId) || p.reporterNome || '';
 // =============================================================== login
 function renderLogin(mode = 'login') {
   stopPolling();
+  const isLogin = mode === 'login';
+  const ico = {
+    mail: '<path d="M3 6.5h18v11H3z"/><path d="m3.5 7 8.5 6.5L20.5 7"/>',
+    lock: '<rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/>',
+    user: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20c.8-3.8 3.7-5.5 7-5.5s6.2 1.7 7 5.5"/>',
+    tv: '<rect x="3" y="6.5" width="18" height="13" rx="2"/><path d="m8 3 4 3.5L16 3"/>',
+    eye: '<path d="M2.5 12S6 5.5 12 5.5 21.500 12 21.5 12 18 18.5 12 18.5 2.500 12 2.500 12Z"/><circle cx="12" cy="12" r="2.800"/>',
+  };
+  const svg = (k) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ico[k]}</svg>`;
+  const field = (id, name, label, type, icon, attrs, extra = '') => `
+    <div class="lg-field"><label for="${id}">${label}</label>
+      <div class="lg-input">${svg(icon)}<input type="${type}" id="${id}" name="${name}" ${attrs}>${type === 'password' ? `<button type="button" class="lg-eye" aria-label="Mostrar senha" aria-pressed="false">${svg('eye')}</button>` : ''}</div>${extra}</div>`;
+  const feats = [['Pautas e matérias', 'O repórter escreve e toda a redação encontra.'], ['Espelho e No Ar', 'Roteiro cronometrado e OK do apresentador ao vivo.'], ['Edição e relatórios', 'Roteiro para o editor de imagens e controle da produção.']];
   $('#app').innerHTML = `
-  <div class="login-wrap"><div class="login-card">
-    <div class="brand"><span class="dot"></span> REDAÇÃO</div>
-    <h1>${mode === 'login' ? 'Acesse a redação' : 'Cadastre sua emissora'}</h1>
-    <p class="sub">Pautas, espelho e laudas do telejornal em um só lugar.</p>
-    <div class="tabs"><button data-mode="login" class="${mode === 'login' ? 'on' : ''}">Entrar</button><button data-mode="signup" class="${mode === 'signup' ? 'on' : ''}">Criar conta</button></div>
-    <form id="authf" autocomplete="on">
-      ${mode === 'signup' ? `
-        <div class="field"><label for="f-org">Emissora / Redação</label><input type="text" id="f-org" name="orgName" ${SUPA_MODE ? '' : 'required'} placeholder="Ex.: TV Cidade">
-          ${SUPA_MODE ? '<span class="hint">Recebeu convite da sua redação? Deixe em branco e use o e-mail convidado.</span>' : ''}</div>
-        <div class="field"><label for="f-name">Seu nome</label><input type="text" id="f-name" name="name" required autocomplete="name"></div>` : ''}
-      <div class="field"><label for="f-email">E-mail</label><input type="email" id="f-email" name="email" required autocomplete="username"></div>
-      <div class="field"><label for="f-pass">Senha</label><input type="password" id="f-pass" name="password" required minlength="${mode === 'signup' ? 8 : 1}" autocomplete="${mode === 'signup' ? 'new-password' : 'current-password'}"></div>
-      <div class="err" id="autherr"></div>
-      <button class="btn primary block" type="submit">${mode === 'login' ? 'Entrar' : 'Criar conta'}</button>
-    </form>
-    ${SUPA_MODE && mode === 'login' ? '<p style="margin:12px 0 0;text-align:center"><a href="#" id="forgot">Esqueci minha senha</a></p>' : ''}
-    ${mode === 'signup' ? '<p class="hint" style="margin-top:12px">Você será o administrador e poderá convidar a equipe (produtores, repórteres, editores, apresentadores).</p>' : ''}
-  </div></div>`;
-  $$('.tabs button').forEach(b => b.onclick = () => renderLogin(b.dataset.mode));
+  <div class="lg">
+    <aside class="lg-stage" aria-hidden="true">
+      <svg class="lg-rings" viewBox="0 0 600 600">
+        <circle class="r1" cx="300" cy="300" r="280"/><circle class="r2" cx="300" cy="300" r="215"/><circle class="r3" cx="300" cy="300" r="150"/>
+      </svg>
+      <div class="lg-stage-in">
+        <span class="lg-live"><i></i> Redação ao vivo</span>
+        <h2>Da pauta ao ar, <br><em>em um só lugar.</em></h2>
+        <p>O sistema de jornalismo da emissora para produzir, escrever, editar e exibir o telejornal.</p>
+        <ul>${feats.map(([h, d]) => `<li><span></span><div><b>${h}</b><small>${d}</small></div></li>`).join('')}</ul>
+      </div>
+    </aside>
+    <main class="lg-panel">
+      <div class="lg-card">
+        <img class="lg-logo" src="logo-ftvtec.png" alt="FTV Tec" width="436" height="176">
+        <h1>${isLogin ? 'Acesse a redação' : 'Cadastre sua emissora'}</h1>
+        <p class="lg-sub">${isLogin ? 'Entre com seu e-mail e senha.' : 'Crie sua conta para começar.'}</p>
+        <div class="lg-tabs" data-on="${mode}"><button type="button" data-mode="login" class="${isLogin ? 'on' : ''}">Entrar</button><button type="button" data-mode="signup" class="${isLogin ? '' : 'on'}">Criar conta</button></div>
+        <form id="authf" autocomplete="on">
+          ${isLogin ? '' : field('f-org', 'orgName', 'Emissora / Redação', 'text', 'tv', `${SUPA_MODE ? '' : 'required'} placeholder="Ex.: TV TEC Jundiaí"`, SUPA_MODE ? '<span class="lg-help">Recebeu um convite? Deixe em branco e use o e-mail convidado.</span>' : '')
+            + field('f-name', 'name', 'Seu nome', 'text', 'user', 'required autocomplete="name" placeholder="Nome e sobrenome"')}
+          ${field('f-email', 'email', 'E-mail', 'email', 'mail', 'required autocomplete="username" placeholder="voce@emissora.com.br"')}
+          ${field('f-pass', 'password', 'Senha', 'password', 'lock', `required minlength="${isLogin ? 1 : 8}" autocomplete="${isLogin ? 'current-password' : 'new-password'}" placeholder="${isLogin ? 'Sua senha' : 'Mínimo de 8 caracteres'}"`)}
+          ${SUPA_MODE && isLogin ? '<div class="lg-forgot"><a href="#" id="forgot">Esqueci minha senha</a></div>' : ''}
+          <div class="err" id="autherr" role="alert"></div>
+          <button class="lg-submit" type="submit"><span>${isLogin ? 'Entrar' : 'Criar conta'}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></button>
+        </form>
+        ${isLogin ? '' : '<p class="lg-note">A primeira conta vira administradora e pode convidar a equipe: produtores, repórteres, editores e apresentadores.</p>'}
+      </div>
+      <footer class="lg-foot">FTV Tec · Sistema de Redação</footer>
+    </main>
+  </div>`;
+  $$('.lg-tabs button').forEach(b => b.onclick = () => { if (b.dataset.mode !== mode) renderLogin(b.dataset.mode); });
+  const eye = $('.lg-eye'); eye.onclick = () => {
+    const i = $('#f-pass'), show = i.type === 'password'; i.type = show ? 'text' : 'password';
+    eye.setAttribute('aria-pressed', show); eye.setAttribute('aria-label', show ? 'Ocultar senha' : 'Mostrar senha');
+  };
+  const msg = (text, ok) => { const e = $('#autherr'); if (e) { e.classList.toggle('ok', !!ok); e.textContent = text; } };
   $('#authf').onsubmit = async (e) => {
     e.preventDefault();
     const body = Object.fromEntries(new FormData(e.target));
+    const btn = $('.lg-submit'); btn.disabled = true; btn.classList.add('busy'); msg('');
     try {
-      const r = await api('POST', mode === 'login' ? '/api/auth/login' : '/api/auth/signup', body);
-      if (r && r.confirm) { $('#autherr').style.color = 'var(--green)'; $('#autherr').textContent = 'Conta criada! Confirme o e-mail que enviamos e depois entre.'; return; }
+      const r = await api('POST', isLogin ? '/api/auth/login' : '/api/auth/signup', body);
+      if (r && r.confirm) { msg('Conta criada! Confirme o e-mail que enviamos e depois entre.', true); return; }
       await boot();
     }
-    catch (er) { $('#autherr').style.color = ''; $('#autherr').textContent = er.message; }
+    catch (er) { msg(er.message); }
+    finally { btn.disabled = false; btn.classList.remove('busy'); }
   };
   const fg = $('#forgot'); if (fg) fg.onclick = async (e) => {
     e.preventDefault();
     const email = $('#f-email').value.trim();
-    if (!email) { $('#autherr').textContent = 'Digite seu e-mail acima e clique novamente.'; return; }
-    try { await api('POST', '/api/auth/forgot', { email }); $('#autherr').style.color = 'var(--green)'; $('#autherr').textContent = 'Enviamos um link para redefinir a senha.'; }
-    catch (er) { $('#autherr').textContent = er.message; }
+    if (!email) { msg('Digite seu e-mail acima e clique novamente.'); $('#f-email').focus(); return; }
+    try { await api('POST', '/api/auth/forgot', { email }); msg('Enviamos um link para redefinir a senha.', true); }
+    catch (er) { msg(er.message); }
   };
 }
-
 // =============================================================== shell
 async function boot() {
   try {
