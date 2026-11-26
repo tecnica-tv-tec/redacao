@@ -381,7 +381,10 @@ async function viewPautas() {
   $('#pf-new').onclick = () => openPauta(null);
   $('#pf-toggle').onclick = (e) => { const on = $('.ws-pautas').classList.toggle('show-filters'); e.target.setAttribute('aria-expanded', on); };
   $('#pf-print').onclick = printPautaList;
-  $('#pauta-list').onclick = e => { const r = e.target.closest('[data-id]'); if (r) (isMobile() ? openFicha : openPauta)(r.dataset.id); };
+  $('#pauta-list').onclick = e => {
+    const v = e.target.closest('[data-view]'); if (v) return verDocumento(v.dataset.view);
+    const r = e.target.closest('[data-id]'); if (r) (isMobile() ? openFicha : openPauta)(r.dataset.id);
+  };
   await reload();
   renderPautaEditor();
   if (S.perms.edit) offerDraftRestore();
@@ -434,8 +437,8 @@ function renderPautaEditor() {
   const p = S.pauta;
   const ws = $('.ws-pautas'); if (ws) ws.classList.toggle('show-editor', !!p);
   if (p && !S.perms.edit) {   // licença de leitura: ficha de consulta
-    el.innerHTML = `<div class="pane-h"><button class="btn sm mob-only" id="p-back">‹ Voltar</button><h2>Consulta da pauta</h2><div style="flex:1"></div><button class="btn primary sm" id="p-print">Baixar PDF / Imprimir</button></div><div class="pane-b">${fichaHtml(p)}</div>`;
-    $('#p-print').onclick = () => printPauta(p); $('#p-back').onclick = fecharEditor; return;
+    el.innerHTML = `<div class="pane-h"><button class="btn sm mob-only" id="p-back">‹ Voltar</button><h2>Consulta da pauta</h2><div style="flex:1"></div><button class="btn sm mob-only" id="p-view">👁 Visualizar</button><button class="btn primary sm" id="p-print">Baixar PDF / Imprimir</button></div><div class="pane-b">${fichaHtml(p)}</div>`;
+    $('#p-print').onclick = () => printPauta(p); $('#p-view').onclick = () => verDocumento(p); $('#p-back').onclick = fecharEditor; return;
   }
   if (!p) { el.innerHTML = `<div class="pane-h"><h2>Pauta</h2></div><div class="empty">Selecione uma pauta na lista ou crie uma nova.<br><br><span class="hint">Atalho: Ctrl+S salva a pauta aberta.</span></div>`; return; }
   const lockedBy = p.lock && !p.lock.mine ? p.lock.name : null;
@@ -601,6 +604,7 @@ function pautaHeadHtml(p, ro) {
     <span class="savestate ${S.pautaDirty ? 'dirty' : ''}" id="pstate">${S.pautaDirty ? 'Alterações não salvas' : p.id ? 'Salva' : 'Não salva'}</span>
     <div class="formbar">
       <button class="btn primary sm" id="p-save" ${ro}>Salvar</button>
+      <button class="btn sm mob-only" id="p-view">👁 Visualizar</button>
       <button class="btn sm" id="p-mat" title="Abrir o espaço de redação da matéria">✎ Matéria</button>
       ${p.id ? `${S.perms.rundown ? '<button class="btn sm" id="p-send">Enviar ao espelho</button>' : ''}<button class="btn sm" id="p-dup">Duplicar</button><button class="btn sm" id="p-print">Imprimir / PDF</button>
       ${S.perms.deletePauta ? `<button class="btn sm danger" id="p-del" ${ro}>Excluir</button>` : ''}` : ''}
@@ -609,6 +613,7 @@ function pautaHeadHtml(p, ro) {
 function bindPautaHead(p) {
   $('#p-save').onclick = savePauta;
   const back = $('#p-back'); if (back) back.onclick = fecharEditor;
+  $('#p-view').onclick = () => verDocumento(p);   // mostra o que está na tela, mesmo ainda não salvo
   $('#p-mat').onclick = async () => {
     if (p.id && S.pautaDirty) await autosavePauta();
     if (p.id && !S.pautaDirty) { S.matOpenId = p.id; S.mf = Object.assign(S.mf || {}, { date: p.data, allDates: false }); return go('materias'); }
@@ -634,11 +639,28 @@ async function fecharEditor() {
 }
 function pautaCard(p) {
   const linha = (r, v) => v ? `<div><span>${r}</span> <b>${esc(v)}</b></div>` : '';
-  return `<button type="button" class="pcard" data-id="${p.id}">
+  return `<div class="pcard-w"><button type="button" class="pcard" data-id="${p.id}">
     <div class="pc-top"><b class="pc-retr">${esc(p.retranca)}</b><span class="pill st-${p.status}">${esc(label(PAUTA_STATUS, p.status))}</span></div>
     <div class="pc-sub">${[S.pf.allDates ? fmtDate(p.data) : '', p.horario, p.local].filter(Boolean).map(esc).join(' · ') || 'Sem horário e local'}</div>
     <div class="pc-team">${linha('Repórter', repName(p))}${linha('Cinegrafista', p.cinegrafista)}${linha('Motorista', p.motorista)}</div>
-  </button>`;
+  </button><button type="button" class="pc-view" data-view="${p.id}">👁 Visualizar</button></div>`;
+}
+// documento da emissora na tela (celular): o mesmo conteúdo do PDF, sem baixar nada
+async function verDocumento(ref) {
+  try {
+    const p = typeof ref === 'string' ? await api('GET', '/api/pautas/' + ref) : ref;
+    const d = printDoc(p, 'tela');
+    const tabs = d.materia ? `<div class="dv-tabs" role="tablist"><button type="button" role="tab" data-dv="pauta" class="on" aria-selected="true">Pauta</button><button type="button" role="tab" data-dv="materia" aria-selected="false">Matéria</button></div>` : '';
+    const md = modal('Visualizar documento', `${tabs}<div class="docview pdf-render"><div class="docs" style="--brand:${d.brand}"><div data-doc="pauta">${d.pauta}</div>${d.materia ? `<div data-doc="materia" hidden>${d.materia}</div>` : ''}<div class="dv-foot">${esc(d.rodape)}</div></div></div>`,
+      { wide: true, footer: '<button class="btn" id="dv-pdf">⬇ Baixar PDF</button><button class="btn primary" data-close>Fechar</button>' });
+    md.el.classList.add('ficha-modal', 'dv-modal'); if (document.activeElement) document.activeElement.blur();
+    $('#dv-pdf', md.el).onclick = () => printPauta(p);
+    $$('[data-dv]', md.el).forEach(b => b.onclick = () => {
+      $$('[data-dv]', md.el).forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-selected', x === b); });
+      $$('[data-doc]', md.el).forEach(x => { x.hidden = x.dataset.doc !== b.dataset.dv; });
+      $('.modal-b', md.el).scrollTop = 0;
+    });
+  } catch (e) { toast(e.message, true); }
 }
 function fichaHtml(p) {
   const mapa = (end) => end ? `<a class="fc-act" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(end)}" target="_blank" rel="noopener">📍 Mapa</a>` : '';
@@ -668,9 +690,10 @@ function fichaHtml(p) {
 async function openFicha(id) {
   try {
     const p = await api('GET', '/api/pautas/' + id);
-    const md = modal('Consulta da pauta', fichaHtml(p), { wide: true, footer: `<button class="btn" id="pp">Baixar PDF / Imprimir</button>${S.perms.edit ? '<button class="btn" id="op">Editar pauta</button>' : ''}<button class="btn primary" data-close>Fechar</button>` });
+    const md = modal('Consulta da pauta', fichaHtml(p), { wide: true, footer: `<button class="btn mob-only" id="pv">👁 Visualizar</button><button class="btn" id="pp">Baixar PDF / Imprimir</button>${S.perms.edit ? '<button class="btn" id="op">Editar pauta</button>' : ''}<button class="btn primary" data-close>Fechar</button>` });
     md.el.classList.add('ficha-modal'); if (document.activeElement) document.activeElement.blur();
     $('#pp', md.el).onclick = () => printPauta(p);
+    $('#pv', md.el).onclick = () => verDocumento(p);
     const op = $('#op', md.el); if (op) op.onclick = async () => {
       md.close(); S.pf.date = p.data; S.pf.allDates = false; if (S.view !== 'pautas') await go('pautas'); openPauta(p.id);
     };
@@ -1197,9 +1220,9 @@ function printDoc(p, mode, download) {
     ${p.status === 'caiu' ? sec('Motivo da queda', txt(p.motivoQueda || '—')) : ''}
     ${sec('Proposta', txt(p.proposta))}
     ${sec('Marcação', (ents.length ? `<table class="doc-tab"><thead><tr><th>Entrevistado</th><th>Função</th><th>Contato</th><th>Data / hora</th><th>Local</th><th>Conf.</th></tr></thead><tbody>
-        ${ents.map(e => `<tr><td><b>${esc(e.nome)}</b></td><td>${esc(e.funcao)}</td><td>${esc(e.telefone)}</td><td>${fmtDate(e.data)} ${esc(e.horario)}</td><td>${esc(e.local)}${e.obs ? `<div class="doc-obs">${esc(e.obs)}</div>` : ''}</td><td>${e.confirmado ? '✓ Sim' : 'Não'}</td></tr>`).join('')}</tbody></table>` : '')
+        ${ents.map(e => `<tr><td data-l="Entrevistado"><b>${esc(e.nome)}</b></td><td data-l="Função">${esc(e.funcao)}</td><td data-l="Contato">${esc(e.telefone)}</td><td data-l="Data / hora">${fmtDate(e.data)} ${esc(e.horario)}</td><td data-l="Local">${esc(e.local)}${e.obs ? `<div class="doc-obs">${esc(e.obs)}</div>` : ''}</td><td data-l="Confirmado">${e.confirmado ? '✓ Sim' : 'Não'}</td></tr>`).join('')}</tbody></table>` : '')
       + (p.local || p.endereco ? `<div class="doc-txt" style="margin-top:6px"><b>Local principal:</b> ${esc(p.local || '')}${p.endereco ? ' — ' + esc(p.endereco) : ''}${p.horario ? ` · <b>Horário:</b> ${esc(p.horario)}` : ''}</div>` : '')
-      + (rot.length ? `<table class="doc-tab" style="margin-top:6px"><thead><tr><th style="width:60px">Hora</th><th>Local</th><th>O que gravar</th></tr></thead><tbody>${rot.map(r => `<tr><td>${esc(r.hora)}</td><td>${esc(r.local)}</td><td>${esc(r.acao)}</td></tr>`).join('')}</tbody></table>` : ''))}
+      + (rot.length ? `<table class="doc-tab" style="margin-top:6px"><thead><tr><th style="width:60px">Hora</th><th>Local</th><th>O que gravar</th></tr></thead><tbody>${rot.map(r => `<tr><td data-l="Hora">${esc(r.hora)}</td><td data-l="Local">${esc(r.local)}</td><td data-l="O que gravar">${esc(r.acao)}</td></tr>`).join('')}</tbody></table>` : ''))}
     ${sec('Informações', txt(p.historico))}
     ${sec('Encaminhamento', txt(p.encaminhamento))}
     ${sec('Sugestão de perguntas', txt(p.perguntas))}
@@ -1217,6 +1240,9 @@ function printDoc(p, mode, download) {
     ${p.proposta ? `<div class="doc-sec"><div class="doc-st">Proposta da pauta</div><div class="doc-txt">${esc(p.proposta)}</div></div>` : ''}
   </div>`;
   };
+
+  if (mode === 'tela') return { pauta: pautaPart(), materia: String(p.materia || '').trim() ? materiaPart() : '',
+    brand: /^#[0-9a-fA-F]{6}$/.test(color) ? color : '#0b3566', rodape: `${o.name || ''}${o.printFooter ? ' · ' + o.printFooter : ''}` };
 
   const parts = mode === 'pauta' ? [pautaPart()] : mode === 'materia' ? [materiaPart()] : [pautaPart(), materiaPart()];
   const brand = /^#[0-9a-fA-F]{6}$/.test(color) ? color : '#0b3566';

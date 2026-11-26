@@ -82,6 +82,12 @@ Administradores sempre têm Geral. Contas novas sem convite começam em Leitura.
 Em telas pequenas, as pautas aparecem em cartões com repórter, cinegrafista e motorista. Tocar no cartão abre a ficha
 de consulta, com a equipe, a marcação e botões **Ligar** e **Mapa**.
 
+**👁 Visualizar** (no cartão, na ficha e na pauta aberta) mostra o documento da emissora na própria tela, com abas
+Pauta e Matéria, sem baixar o PDF.
+
+Ao salvar o site nos favoritos ou na tela inicial, o ícone é o logotipo da emissora (`public/icon-*.png` e
+`public/manifest.json`). Esses ícones são arquivos fixos: trocar o logo em **Equipe** não os altera.
+
 ## Acesso restrito ao domínio
 
 - Só cria conta quem usa e-mail **@tvtecjundiai.com.br**. A regra está no banco (`public.acesso_config` e o gancho
