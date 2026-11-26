@@ -640,6 +640,15 @@ textarea.mat-text { flex: 1; min-height: 320px; margin: 12px 18px; width: auto; 
   .capa-view { border-radius: 0; }
 }
 
+.ph-logo { height: 28px; width: auto; max-width: 90px; object-fit: contain; background: #fff; border-radius: 4px; padding: 2px 5px; }
+.tso { display: flex; flex-direction: column; gap: 10px; }
+.tso p { margin: 0; }
+.tso [hidden], .modal-f [hidden] { display: none; }
+.tso a { color: inherit; text-decoration: underline; }
+.tso textarea { width: 100%; }
+.tso-status:empty { display: none; }
+.tso-status.e { color: var(--red); }
+#print-area .list-logo { display: block; max-width: 46mm; max-height: 20mm; margin-bottom: 8px; }
 #print-area { display: none; }
 @media print {
   body { overflow: visible; background: #fff; color: #000; }

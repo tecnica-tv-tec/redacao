@@ -106,6 +106,8 @@ const materiaPill = (p) => String(p.materia || '').trim()
 const MOTIVOS_QUEDA = ['Entrevistado desmarcou', 'Fato perdeu relevância', 'Equipe deslocada para factual', 'Sem autorização de imagem', 'Clima / chuva', 'Falta de equipe ou carro', 'Pauta derrubada pela chefia'];
 const LICENCAS = [['leitura', 'Leitura'], ['edicao', 'Edição'], ['geral', 'Geral']];
 const isMobile = () => window.matchMedia('(max-width: 760px)').matches;
+// logotipo da emissora: o cadastrado em Equipe → Identidade; sem cadastro, o arquivo padrão do site
+const orgLogo = () => (S.org && S.org.logo) || 'logo-ftvtec.png';
 const PRIORIDADES = [['baixa', 'Baixa'], ['normal', 'Normal'], ['alta', 'Alta'], ['urgente', 'Urgente']];
 const FORMATOS = ['VT', 'NC', 'NOTA', 'NP', 'LINK', 'SONORA', 'STAND-UP', 'ENTREVISTA', 'SÉRIE', 'ARTE'];
 const TIPOS = ['ESCALADA', 'VINHETA', 'CABEÇA', 'NOTA', 'NC', 'NP', 'VT', 'VT+NP', 'SONORA', 'LINK', 'VIVO', 'STAND-UP', 'ENTREVISTA', 'ENTREVISTA ESTÚDIO', 'ARTE', 'CHAMADA', 'PASSAGEM', 'ENCERRAMENTO', 'INTERVALO'];
@@ -361,7 +363,7 @@ async function viewPautas() {
         <div class="hint" id="pf-count"></div>
       </div>
     </aside>
-    <section class="pane"><div class="pane-h"><h2>Pautas</h2><span class="hint" id="pf-label"></span><div style="flex:1"></div>
+    <section class="pane"><div class="pane-h"><img class="ph-logo" src="${esc(orgLogo())}" alt="${esc((S.org && S.org.name) || '')}"><h2>Pautas</h2><span class="hint" id="pf-label"></span><div style="flex:1"></div>
         <button class="btn sm mob-only" id="pf-toggle" aria-expanded="false">Filtros</button>
         <button class="btn sm" id="pf-capa" title="Cronograma das pautas do dia seguinte">🗒 Capa da pauta</button>
         <button class="btn sm" id="pf-print">Imprimir lista</button><button class="btn primary sm" id="pf-new">+ Nova pauta</button></div>
@@ -529,6 +531,7 @@ function renderPautaEditor() {
       <div class="formbar" style="margin-bottom:8px">
         <span class="lbl">Inserir:</span>
         ${['OFF', 'SONORA', 'PASSAGEM', 'ARTE', 'GC', 'TRILHA', 'IMAGEM'].map(t => `<button class="btn sm" data-ins="${t}" ${ro}>[${t}]</button>`).join('')}
+        <button class="btn sm needs-edit" data-transcrever ${ro} title="Transcrever áudio ou vídeo com o transcribe.so">🎙 Transcrever</button>
         <div style="flex:1"></div>
         <label class="lbl" for="mat-st">Situação</label>
         <select id="mat-st" data-pf="materiaStatus" style="width:auto" ${ro}>${opts(MATERIA_STATUS, p.materiaStatus || '')}</select>
@@ -584,6 +587,7 @@ function renderPautaEditor() {
       const ta = $('[data-pf=motivoQueda]', form); ta.value = ta.value.trim() ? ta.value.trim() + '; ' + b.dataset.motivo : b.dataset.motivo;
       ta.dispatchEvent(new Event('input', { bubbles: true })); ta.focus(); return;
     }
+    if (b.hasAttribute('data-transcrever')) return abrirTranscricao(p.id, () => $('#pform [data-pf=materia]'));
     if (b.dataset.ins) {   // insere marcação de roteiro no cursor
       const ta = $('[data-pf=materia]', form); const tag = `[${b.dataset.ins}] `;
       const s = ta.selectionStart, before = ta.value.slice(0, s);
@@ -1168,7 +1172,8 @@ function pautaHtml(p, screen) {
 }
 // realça as marcações de roteiro [OFF], [SONORA]… (recebe texto já escapado)
 const markScript = (html, screen) => html.replace(/\[([^\]\n]{1,40})\]/g, screen ? '<b class="tag">[$1]</b>' : '<b>[$1]</b>');
-function doPrint(html) { $('#print-area').innerHTML = html; window.print(); }
+function doPrint(html) { $('#print-area').innerHTML = html;
+  Promise.all($$('#print-area img').map(i => i.complete ? 1 : new Promise(r => { i.onload = i.onerror = r; }))).then(() => window.print()); }
 // Impressão / PDF com a identidade da emissora: escolhe pauta, matéria ou as duas
 function printPauta(p, preset) {
   const temMat = String(p.materia || '').trim().length > 0;
@@ -1181,8 +1186,7 @@ function printPauta(p, preset) {
       ${opt('materia', 'Só a matéria', 'O texto do repórter em formato de lauda (marcação | texto).', !temMat)}
     </div>
     ${temMat ? '' : '<p class="hint">Esta pauta ainda não tem matéria escrita.</p>'}
-    <p class="hint" style="margin-bottom:0"><b>Baixar PDF</b> salva o arquivo direto no computador, com o logotipo e o rodapé da emissora em todas as páginas.
-      ${S.org.logo ? '' : (S.perms.manageUsers ? 'O logotipo da emissora pode ser cadastrado em <b>Equipe → Identidade da emissora</b>.' : '')}</p>`,
+    <p class="hint" style="margin-bottom:0"><b>Baixar PDF</b> salva o arquivo direto no computador, com o logotipo e o rodapé da emissora em todas as páginas.</p>`,
     { footer: '<button class="btn" data-close>Cancelar</button><button class="btn" id="pprint">Imprimir</button><button class="btn primary" id="pgo">⬇ Baixar PDF</button>' });
   const choice = () => $('input[name=pm]:checked', md.el).value;
   $('#pprint', md.el).onclick = () => { const v = choice(); md.close(); printDoc(p, v); };
@@ -1204,7 +1208,7 @@ function printDoc(p, mode, download) {
   const o = S.org || {}; const color = o.printColor || '#0b3566';
   const prog = p.programaId ? (S.programs.find(x => x.id === p.programaId) || {}).name || '' : '';
   const head = (kind) => `<div class="doc-h">
-      <div class="doc-logo">${o.logo ? `<img src="${esc(o.logo)}" alt="">` : `<div class="doc-org">${esc(o.name || '')}</div>`}</div>
+      <div class="doc-logo"><img src="${esc(orgLogo())}" alt="${esc(o.name || '')}"></div>
       <div class="doc-t"><div class="doc-kind">${kind}</div><div class="doc-retr">${esc(p.retranca)}</div>
         <div class="doc-sub">${p.data ? `${esc(weekday(p.data))}, ${fmtDate(p.data)}` : ''}${prog ? ' · ' + esc(prog) : ''}</div></div></div>`;
   const meta = (pairs) => `<table class="doc-meta"><tbody>${pairs.reduce((acc, x, i) => { if (i % 3 === 0) acc.push([]); acc[acc.length - 1].push(x); return acc; }, [])
@@ -1278,7 +1282,7 @@ function pdfLogo(src) {
       const isSvg = src.startsWith('data:image/svg');
       const w = img.naturalWidth || 600, h = img.naturalHeight || 240;
       if (!isSvg && /^data:image\/(png|jpeg)/.test(src)) return ok({ data: src, fmt: src.startsWith('data:image/png') ? 'PNG' : 'JPEG', w, h });
-      const k = Math.max(1, 2400 / w);                    // webp/svg → PNG grande
+      const k = /\.png$/.test(src) ? 1 : Math.max(1, 2400 / w);   // webp/svg → PNG grande; arquivo PNG mantém o tamanho
       const c = document.createElement('canvas'); c.width = Math.round(w * k); c.height = Math.round(h * k);
       c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
       ok({ data: c.toDataURL('image/png'), fmt: 'PNG', w: c.width, h: c.height });
@@ -1299,7 +1303,7 @@ async function downloadPdf(p, mode, brandHex, fileName, footL, footR) {
     const W = 210, H = 297, M = 14, TOP = 16, BOT = H - 20, CW = W - 2 * M;
     const B = [1, 3, 5].map(i => parseInt(brandHex.slice(i, i + 2), 16));
     const GRAY = [90, 96, 105], LINE = [214, 219, 225], SOFT = [243, 245, 248];
-    const logo = await pdfLogo(o.logo);
+    const logo = await pdfLogo(orgLogo());
     const prog = p.programaId ? (S.programs.find(x => x.id === p.programaId) || {}).name || '' : '';
     let y = TOP;
     const font = (style, size, color) => { doc.setFont('helvetica', style); doc.setFontSize(size); doc.setTextColor(...(color || [20, 22, 26])); };
@@ -1421,7 +1425,7 @@ async function downloadPdf(p, mode, brandHex, fileName, footL, footR) {
   } catch (e) { console.error(e); toast('Erro ao gerar o PDF: ' + e.message, true); }
 }
 function printPautaList() {
-  doPrint(`<h1>Pautas — ${S.pf.allDates ? 'todas as datas' : fmtDate(S.pf.date)}</h1><div style="font-size:9pt">${esc(S.org.name)}</div><br>
+  doPrint(`<img class="list-logo" src="${esc(orgLogo())}" alt=""><h1>Pautas — ${S.pf.allDates ? 'todas as datas' : fmtDate(S.pf.date)}</h1><div style="font-size:9pt">${esc(S.org.name)}</div><br>
     <table><tr><th>Retranca</th><th>Data</th><th>Hora</th><th>Status</th><th>Editoria</th><th>Repórter</th><th>Local</th><th>Proposta</th></tr>
     ${S.pautas.map(p => `<tr><td><b>${esc(p.retranca)}</b></td><td>${fmtDate(p.data)}</td><td>${esc(p.horario)}</td><td>${esc(label(PAUTA_STATUS, p.status))}</td><td>${esc(p.editoria)}</td><td>${esc(repName(p))}</td><td>${esc(p.local)}</td><td>${esc(p.proposta)}</td></tr>`).join('')}</table>`);
 }
@@ -1449,7 +1453,7 @@ function capaHtml(d, linhas, obs) {
   const o = S.org || {};
   const cel = (arr) => `<div>${arr.map(x => `<div>${esc(x)}</div>`).join('') || '—'}</div>`;
   return `<div class="doc">
-    <div class="doc-h"><div class="doc-logo">${o.logo ? `<img src="${esc(o.logo)}" alt="">` : `<div class="doc-org">${esc(o.name || '')}</div>`}</div>
+    <div class="doc-h"><div class="doc-logo"><img src="${esc(orgLogo())}" alt="${esc(o.name || '')}"></div>
       <div class="doc-t"><div class="doc-kind">CAPA DA PAUTA</div><div class="doc-retr">Cronograma do dia</div><div class="doc-sub" style="text-transform:none">${esc(capaTitulo(d))} · ${linhas.length} pauta(s)</div></div></div>
     ${linhas.length ? `<table class="doc-tab doc-capa"><thead><tr><th style="width:56px">Horário</th><th style="width:30%">Pauta</th><th style="width:26%">Equipe</th><th>Local e marcação</th></tr></thead><tbody>
       ${linhas.map(l => `<tr><td data-l="Horário"><div><b>${esc(l.hora)}</b></div></td><td data-l="Pauta"><div><b>${esc(l.retranca)}</b>${l.pauta.map(x => `<div>${esc(x)}</div>`).join('')}</div></td><td data-l="Equipe">${cel(l.equipe)}</td><td data-l="Local">${cel(l.local)}</td></tr>`).join('')}
@@ -1512,7 +1516,7 @@ async function capaPdf(d, linhas, obs, brandHex) {
     const W = 210, H = 297, M = 14;
     const B = [1, 3, 5].map(i => parseInt(brandHex.slice(i, i + 2), 16));
     const font = (style, size, color) => { doc.setFont('helvetica', style); doc.setFontSize(size); doc.setTextColor(...(color || [20, 22, 26])); };
-    const logo = await pdfLogo(o.logo);
+    const logo = await pdfLogo(orgLogo());
     if (logo) { const s = Math.min(50 / logo.w, 20 / logo.h); doc.addImage(logo.data, logo.fmt, M, 16 + (20 - logo.h * s) / 2, logo.w * s, logo.h * s, undefined, 'FAST'); }
     else { font('bold', 15, B); doc.text(pdfSafe(o.name || ''), M, 27); }
     font('bold', 17); doc.text('CAPA DA PAUTA', W - M, 22, { align: 'right' });
@@ -1795,6 +1799,7 @@ function renderMatEditor() {
     </div>
     <div class="mat-tools">
       ${['OFF', 'SONORA', 'PASSAGEM', 'ARTE', 'GC', 'TRILHA', 'IMAGEM'].map(t => `<button class="btn sm" data-ins="${t}" ${ro}>[${t}]</button>`).join('')}
+        <button class="btn sm needs-edit" data-transcrever ${ro} title="Transcrever áudio ou vídeo com o transcribe.so">🎙 Transcrever</button>
       <div style="flex:1"></div>
       <label class="lbl" for="m-st">Situação</label>
       <select id="m-st" style="width:auto" ${ro}>${opts(MATERIA_STATUS, p.materiaStatus || '')}</select>
@@ -1830,6 +1835,7 @@ function renderMatEditor() {
     const ins = (before && !before.endsWith('\n') ? '\n\n' : '') + `[${t}] ` + (['SONORA', 'PASSAGEM', 'GC'].includes(t) ? 'NOME / CARGO\n' : '');
     ta.setRangeText(ins, s, ta.selectionEnd, 'end'); ta.focus(); ta.oninput();
   });
+  $('#mat-editor [data-transcrever]').onclick = () => abrirTranscricao(p.id, () => (S.mat && S.mat.id === p.id ? $('#m-text') : null));
   $('#m-save').onclick = () => saveMateria(true);
   $('#m-print').onclick = async () => { if (S.matDirty) await saveMateria(); printPauta(S.mat); };
   $('#m-pauta').onclick = async () => { const id = p.id; S.pf.date = p.data; S.pf.allDates = false; await go('pautas'); if (S.view === 'pautas') openPauta(id); };
@@ -2493,7 +2499,7 @@ async function viewEquipe() {
   let brLogo = S.org.logo || '';
   const brPrev = () => {
     const c = $('#br-color').value;
-    $('#br-prev').innerHTML = `<div class="bp-h" style="border-color:${esc(c)}"><div class="bp-logo">${brLogo ? `<img src="${esc(brLogo)}" alt="Logotipo">` : `<b>${esc($('#br-name').value)}</b>`}</div>
+    $('#br-prev').innerHTML = `<div class="bp-h" style="border-color:${esc(c)}"><div class="bp-logo"><img src="${esc(brLogo || 'logo-ftvtec.png')}" alt="Logotipo"></div>
       <div class="bp-t"><div style="color:${esc(c)}">PAUTA</div><b>RETRANCA DA MATÉRIA</b></div></div><div class="bp-l"></div><div class="bp-l s"></div><div class="bp-l"></div>`;
   };
   brPrev();
