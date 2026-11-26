@@ -250,7 +250,7 @@ function renderShell() {
   $('#app').innerHTML = `
   <div class="shell ${S.perms.edit ? '' : 'lic-leitura'}">
     <header class="topbar">
-      <div class="brand"><span class="dot"></span> REDAÇÃO</div>
+      <div class="brand"><span class="dot"></span> REDAÇÃO TVTEC JUNDIAÍ</div>
       <nav class="nav">${nav.filter(([k]) => k !== 'espelho' || S.perms.rundown).map(([k, l]) => `<button data-go="${k}">${l}</button>`).join('')}</nav>
       <div class="spacer"></div>
       <form id="gsearch-f" class="gsearch" role="search"><input type="search" id="gsearch" placeholder="Buscar pautas e matérias…" aria-label="Buscar pautas e matérias"></form>
@@ -531,7 +531,6 @@ function renderPautaEditor() {
       <div class="formbar" style="margin-bottom:8px">
         <span class="lbl">Inserir:</span>
         ${['OFF', 'SONORA', 'PASSAGEM', 'ARTE', 'GC', 'TRILHA', 'IMAGEM'].map(t => `<button class="btn sm" data-ins="${t}" ${ro}>[${t}]</button>`).join('')}
-        <button class="btn sm needs-edit" data-transcrever ${ro} title="Transcrever áudio ou vídeo com o transcribe.so">🎙 Transcrever</button>
         <div style="flex:1"></div>
         <label class="lbl" for="mat-st">Situação</label>
         <select id="mat-st" data-pf="materiaStatus" style="width:auto" ${ro}>${opts(MATERIA_STATUS, p.materiaStatus || '')}</select>
@@ -587,7 +586,6 @@ function renderPautaEditor() {
       const ta = $('[data-pf=motivoQueda]', form); ta.value = ta.value.trim() ? ta.value.trim() + '; ' + b.dataset.motivo : b.dataset.motivo;
       ta.dispatchEvent(new Event('input', { bubbles: true })); ta.focus(); return;
     }
-    if (b.hasAttribute('data-transcrever')) return abrirTranscricao(p.id, () => $('#pform [data-pf=materia]'));
     if (b.dataset.ins) {   // insere marcação de roteiro no cursor
       const ta = $('[data-pf=materia]', form); const tag = `[${b.dataset.ins}] `;
       const s = ta.selectionStart, before = ta.value.slice(0, s);
@@ -1799,7 +1797,6 @@ function renderMatEditor() {
     </div>
     <div class="mat-tools">
       ${['OFF', 'SONORA', 'PASSAGEM', 'ARTE', 'GC', 'TRILHA', 'IMAGEM'].map(t => `<button class="btn sm" data-ins="${t}" ${ro}>[${t}]</button>`).join('')}
-        <button class="btn sm needs-edit" data-transcrever ${ro} title="Transcrever áudio ou vídeo com o transcribe.so">🎙 Transcrever</button>
       <div style="flex:1"></div>
       <label class="lbl" for="m-st">Situação</label>
       <select id="m-st" style="width:auto" ${ro}>${opts(MATERIA_STATUS, p.materiaStatus || '')}</select>
@@ -1835,7 +1832,6 @@ function renderMatEditor() {
     const ins = (before && !before.endsWith('\n') ? '\n\n' : '') + `[${t}] ` + (['SONORA', 'PASSAGEM', 'GC'].includes(t) ? 'NOME / CARGO\n' : '');
     ta.setRangeText(ins, s, ta.selectionEnd, 'end'); ta.focus(); ta.oninput();
   });
-  $('#mat-editor [data-transcrever]').onclick = () => abrirTranscricao(p.id, () => (S.mat && S.mat.id === p.id ? $('#m-text') : null));
   $('#m-save').onclick = () => saveMateria(true);
   $('#m-print').onclick = async () => { if (S.matDirty) await saveMateria(); printPauta(S.mat); };
   $('#m-pauta').onclick = async () => { const id = p.id; S.pf.date = p.data; S.pf.allDates = false; await go('pautas'); if (S.view === 'pautas') openPauta(id); };
