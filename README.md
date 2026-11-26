@@ -59,6 +59,12 @@ Login de demonstraÃ§Ã£o: `admin@demo.local` / `demo1234`. TambÃ©m existem 
   com esse e-mail, deixando o campo da emissora em branco, e entra direto na redaÃ§Ã£o.
 - **Esqueci minha senha**: o Supabase envia o link de redefiniÃ§Ã£o por e-mail.
 
+## Funcionários e equipe da pauta
+
+- **Equipe → Funcionários:** cadastro de nome e função (não cria login). Pode mexer: Administrador, Diretor de Produção e Multimídia e Chefe de reportagem.
+- Na pauta, o bloco **Equipe** tem Produtor, Repórter, Repórter cinematográfico, Motorista e Editor de imagens, com sugestões do cadastro e digitação livre.
+- Cargo de acesso **Diretor de Produção e Multimídia:** gerencia telejornais e funcionários, aprova espelhos e exclui pautas. A gestão de contas continua só com o Administrador.
+
 ## Acesso restrito ao domínio
 
 - Só cria conta quem usa e-mail **@tvtecjundiai.com.br**. A regra está no banco (`public.acesso_config` e o gancho

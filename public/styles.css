@@ -397,6 +397,11 @@ table.edscript { width: calc(100% - 36px); margin: 8px 18px; border-collapse: co
 /* equipe dentro do item 1 da pauta */
 .teambox { margin-top: 4px; padding: 10px 12px 2px; border: 1px dashed var(--line-2); border-radius: 6px; background: rgba(255,255,255,.015); }
 .teambox-h { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+.teambox .field { justify-content: flex-end; }
+.teamgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0 10px; }
+.fn-form { display: grid; grid-template-columns: 1fr 1fr auto; gap: 0 10px; align-items: end; }
+.fn-form button { margin-bottom: 12px; }
+@media (max-width: 640px) { .fn-form { grid-template-columns: 1fr; } }
 .teambox-h .lbl { color: var(--accent); font-weight: 600; }
 
 /* ---------- Matérias (espaço de redação) ---------- */

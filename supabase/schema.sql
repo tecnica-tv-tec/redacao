@@ -22,6 +22,8 @@ alter table public.orgs add column if not exists print_footer text not null defa
 -- nomes sugeridos na pauta (Equipe técnica)
 alter table public.orgs add column if not exists cinegrafistas text[] not null default '{}';
 alter table public.orgs add column if not exists motoristas    text[] not null default '{}';
+-- cadastro de funcionários: [{nome, funcao}]
+alter table public.orgs add column if not exists funcionarios  jsonb  not null default '[]'::jsonb;
 
 create table if not exists public.profiles (
   id          uuid primary key references auth.users(id) on delete cascade,
@@ -29,7 +31,7 @@ create table if not exists public.profiles (
   name        text not null,
   email       text not null,
   role        text not null default 'reporter'
-              check (role in ('admin','chefe','editor','produtor','reporter','apresentador')),
+              check (role in ('admin','chefe','editor','produtor','reporter','apresentador','editor_imagem','diretor')),
   active      boolean not null default true,
   created_at  timestamptz not null default now()
 );
@@ -43,7 +45,7 @@ create table if not exists public.invites (
   email       text not null unique,
   name        text,
   role        text not null default 'reporter'
-              check (role in ('admin','chefe','editor','produtor','reporter','apresentador')),
+              check (role in ('admin','chefe','editor','produtor','reporter','apresentador','editor_imagem','diretor')),
   created_by  uuid references public.profiles(id) on delete set null,
   created_at  timestamptz not null default now()
 );
@@ -108,6 +110,7 @@ alter table public.pautas add column if not exists materia_autor_id uuid referen
 alter table public.pautas add column if not exists materia_at       timestamptz;
 -- EQUIPE da pauta: repórter digitado (quando não é usuário do sistema) e motorista
 alter table public.pautas add column if not exists reporter_nome    text not null default '';
+alter table public.pautas add column if not exists produtor_nome    text not null default '';
 alter table public.pautas add column if not exists motorista        text not null default '';
 -- EDIÇÃO DE IMAGENS: andamento da edição do VT
 alter table public.pautas add column if not exists edicao_status    text not null default '';
@@ -116,10 +119,10 @@ alter table public.pautas add column if not exists edicao_obs       text not nul
 -- função "Editor de imagens"
 alter table public.profiles drop constraint if exists profiles_role_check;
 alter table public.profiles add constraint profiles_role_check
-  check (role in ('admin','chefe','editor','produtor','reporter','apresentador','editor_imagem'));
+  check (role in ('admin','chefe','editor','produtor','reporter','apresentador','editor_imagem','diretor'));
 alter table public.invites drop constraint if exists invites_role_check;
 alter table public.invites add constraint invites_role_check
-  check (role in ('admin','chefe','editor','produtor','reporter','apresentador','editor_imagem'));
+  check (role in ('admin','chefe','editor','produtor','reporter','apresentador','editor_imagem','diretor'));
 -- QUEDA: justificativa obrigatória quando a pauta cai
 alter table public.pautas add column if not exists motivo_queda     text not null default '';
 -- HISTÓRICO DE STATUS (relatório de tempo de produção): [{status, at, by}]
@@ -217,7 +220,7 @@ $$;
 
 create or replace function public.is_editor() returns boolean
 language sql stable security definer set search_path = public as $$
-  select coalesce(public.my_role() in ('admin','chefe','editor'), false)
+  select coalesce(public.my_role() in ('admin','chefe','editor','diretor'), false)
 $$;
 
 -- ---------------------------------------------------------------- cadastro / convite
@@ -348,6 +351,21 @@ begin
   where id = public.my_org();
 end $$;
 
+-- Cadastro de funcionários (nomes sugeridos na pauta): administrador, diretor e chefe
+create or replace function public.set_funcionarios(p_lista jsonb)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if coalesce(public.my_role(), '') not in ('admin','chefe','diretor') then raise exception 'Sem permissão.'; end if;
+  update public.orgs set funcionarios = coalesce((
+    select jsonb_agg(jsonb_build_object('nome', left(trim(x->>'nome'), 80), 'funcao', left(trim(x->>'funcao'), 80)))
+    from jsonb_array_elements(p_lista) x
+    where trim(coalesce(x->>'nome', '')) <> '' and trim(coalesce(x->>'funcao', '')) <> ''), '[]'::jsonb),
+    cinegrafistas = '{}', motoristas = '{}'
+  where id = public.my_org();
+end $$;
+revoke all on function public.set_funcionarios(jsonb) from public, anon;
+grant execute on function public.set_funcionarios(jsonb) to authenticated;
+
 -- Modo NO AR: qualquer membro da redação dá OK no que foi exibido (mesmo com espelho fechado)
 create or replace function public.on_air_item(p_item uuid, p_ok boolean)
 returns uuid language plpgsql security definer set search_path = public as $$
@@ -425,7 +443,7 @@ begin
     select * into l from public.locks
       where org_id = old.org_id and key = 'p:' || old.id and until > now() and user_id <> auth.uid();
     if found then raise exception 'Pauta em edição por %.', l.name; end if;
-    if new.deleted and not old.deleted and coalesce(public.my_role(), '') not in ('admin','chefe','produtor') then
+    if new.deleted and not old.deleted and coalesce(public.my_role(), '') not in ('admin','chefe','diretor','produtor') then
       raise exception 'Sem permissão para excluir pautas.';
     end if;
   end if;
@@ -546,11 +564,11 @@ create policy invites_all on public.invites for all
   with check (org_id = public.my_org() and public.my_role() = 'admin');
 
 create policy programs_sel on public.programs for select using (org_id = public.my_org());
-create policy programs_ins on public.programs for insert with check (org_id = public.my_org() and public.my_role() in ('admin','chefe'));
+create policy programs_ins on public.programs for insert with check (org_id = public.my_org() and public.my_role() in ('admin','chefe','diretor'));
 create policy programs_upd on public.programs for update
-  using (org_id = public.my_org() and public.my_role() in ('admin','chefe')) with check (org_id = public.my_org());
+  using (org_id = public.my_org() and public.my_role() in ('admin','chefe','diretor')) with check (org_id = public.my_org());
 create policy programs_del on public.programs for delete
-  using (org_id = public.my_org() and public.my_role() in ('admin','chefe'));
+  using (org_id = public.my_org() and public.my_role() in ('admin','chefe','diretor'));
 
 create policy pautas_sel on public.pautas for select using (org_id = public.my_org());
 create policy pautas_ins on public.pautas for insert with check (org_id = public.my_org());

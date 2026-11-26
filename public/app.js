@@ -88,7 +88,7 @@ function modal(title, bodyHtml, { wide, footer } = {}) {
 }
 
 // =============================================================== constantes do domínio
-const EDITORIAS = ['Cidade', 'Política', 'Economia', 'Polícia', 'Saúde', 'Educação', 'Esporte', 'Cultura', 'Tempo', 'Trânsito', 'Nacional', 'Internacional', 'Serviço', 'Comunidade'];
+const EDITORIAS = ['Geral', 'Cidade', 'Política', 'Economia', 'Polícia', 'Segurança','Saúde', 'Educação', 'Esporte', 'Cultura', 'Tempo', 'Trânsito', 'Nacional', 'Internacional', 'Serviço', 'Comunidade'];
 const PAUTA_STATUS = [
   ['sugestao', 'Sugestão'], ['em_apuracao', 'Em apuração'], ['em_producao', 'Em produção'], ['pronta', 'Pronta p/ gravar'],
   ['gravada', 'Gravada'], ['exibida', 'Exibida'], ['caiu', 'Caiu'],
@@ -105,8 +105,8 @@ const materiaPill = (p) => String(p.materia || '').trim()
   : '<span class="hint">—</span>';
 const MOTIVOS_QUEDA = ['Entrevistado desmarcou', 'Fato perdeu relevância', 'Equipe deslocada para factual', 'Sem autorização de imagem', 'Clima / chuva', 'Falta de equipe ou carro', 'Pauta derrubada pela chefia'];
 const PRIORIDADES = [['baixa', 'Baixa'], ['normal', 'Normal'], ['alta', 'Alta'], ['urgente', 'Urgente']];
-const FORMATOS = ['VT', 'NC', 'NOTA', 'NP', 'LINK', 'VIVO', 'SONORA', 'STAND-UP', 'ENTREVISTA', 'SÉRIE', 'ARTE'];
-const TIPOS = ['ESCALADA', 'VINHETA', 'CABEÇA', 'NOTA', 'NC', 'NP', 'VT', 'VT+NP', 'SONORA', 'LINK', 'VIVO', 'STAND-UP', 'ENTREVISTA', 'ARTE', 'CHAMADA', 'PASSAGEM', 'ENCERRAMENTO', 'INTERVALO'];
+const FORMATOS = ['VT', 'NC', 'NOTA', 'NP', 'LINK', 'SONORA', 'STAND-UP', 'ENTREVISTA', 'SÉRIE', 'ARTE'];
+const TIPOS = ['ESCALADA', 'VINHETA', 'CABEÇA', 'NOTA', 'NC', 'NP', 'VT', 'VT+NP', 'SONORA', 'LINK', 'VIVO', 'STAND-UP', 'ENTREVISTA', 'ENTREVISTA ESTÚDIO', 'ARTE', 'CHAMADA', 'PASSAGEM', 'ENCERRAMENTO', 'INTERVALO'];
 const ITEM_STATUS = [['rascunho', 'Rascunho'], ['em_edicao', 'Em edição'], ['pronto', 'Pronto'], ['aprovado', 'Aprovado'], ['caiu', 'Caiu']];
 const RD_STATUS = [['aberto', 'ABERTO'], ['fechado', 'FECHADO'], ['no_ar', 'NO AR'], ['encerrado', 'ENCERRADO']];
 const label = (list, v) => (list.find(x => x[0] === v) || [v, v])[1];
@@ -126,6 +126,17 @@ const S = {
 const userName = (id) => { const u = S.users.find(u => u.id === id); return u ? u.name : ''; };
 // repórter da pauta: usuário do sistema ou nome digitado
 const repName = (p) => userName(p.reporterId) || p.reporterNome || '';
+const prodName = (p) => userName(p.produtorId) || p.produtorNome || '';
+const CARGO_DIRETOR = 'Diretor de Produção e Multimídia';
+const FUNCOES = [CARGO_DIRETOR, 'Chefe de reportagem', 'Produtor', 'Repórter', 'Repórter cinematográfico', 'Motorista', 'Editor de texto', 'Editor de imagens', 'Apresentador'];
+// funcionários cadastrados (inclui os nomes do cadastro antigo de cinegrafistas e motoristas)
+function funcionarios() {
+  const o = S.org || {}, lista = (o.funcionarios || []).map(f => ({ nome: f.nome, funcao: f.funcao }));
+  const tem = (n, fn) => lista.some(f => f.nome === n && f.funcao === fn);
+  (o.cinegrafistas || []).forEach(n => { if (!tem(n, 'Repórter cinematográfico')) lista.push({ nome: n, funcao: 'Repórter cinematográfico' }); });
+  (o.motoristas || []).forEach(n => { if (!tem(n, 'Motorista')) lista.push({ nome: n, funcao: 'Motorista' }); });
+  return lista;
+}
 
 // =============================================================== login
 function renderLogin(mode = 'login') {
@@ -442,15 +453,17 @@ function renderPautaEditor() {
       </div>
       <div class="row3">
         <div class="field"><label>Telejornal (destino)</label><select data-pf="programaId" ${ro}><option value="">—</option>${opts(S.programs.map(x => [x.id, x.name]), p.programaId)}</select></div>
-        <div class="field"><label>Formato</label><select data-pf="formato" ${ro}>${opts(FORMATOS, p.formato)}</select></div>
+        <div class="field"><label>Formato</label><select data-pf="formato" ${ro}>${opts(!p.formato || FORMATOS.includes(p.formato) ? FORMATOS : [...FORMATOS, p.formato], p.formato)}</select></div>
         <div class="field"><label>Palavras-chave</label><input type="text" data-pf="tags" value="${F('tags')}" placeholder="separadas por vírgula" ${ro}></div>
       </div>
       <div class="teambox">
         <div class="teambox-h"><span class="lbl">Equipe</span><span class="hint">escolha da lista ou digite o nome</span></div>
-        <div class="row3">
+        <div class="teamgrid">
+          <div class="field"><label>Produtor</label><input type="text" list="dl-prod" data-team="produtor" value="${esc(prodName(p))}" placeholder="Nome do produtor" autocomplete="off" ${ro}></div>
           <div class="field"><label>Repórter</label><input type="text" list="dl-rep" data-team="reporter" value="${esc(repName(p))}" placeholder="Nome do repórter" autocomplete="off" ${ro}></div>
           <div class="field"><label>Repórter cinematográfico</label><input type="text" list="dl-cine" data-pf="cinegrafista" value="${F('cinegrafista')}" placeholder="Nome do cinegrafista" autocomplete="off" ${ro}></div>
           <div class="field"><label>Motorista</label><input type="text" list="dl-mot" data-pf="motorista" value="${F('motorista')}" placeholder="Nome do motorista" autocomplete="off" ${ro}></div>
+          <div class="field"><label>Editor de imagens</label><input type="text" list="dl-eimg" data-pf="edicaoEditor" value="${F('edicaoEditor')}" placeholder="Nome do editor de imagens" autocomplete="off" ${ro}></div>
         </div>
       </div>
       ${teamLists()}
@@ -511,10 +524,7 @@ function renderPautaEditor() {
 
     <div class="sec"><h3>Encaminhamento</h3><div class="sb"><textarea data-pf="encaminhamento" rows="3" placeholder="Orientação para a equipe: abordagem, sonoras necessárias, passagem, imagens obrigatórias, cuidados." ${ro}>${F('encaminhamento')}</textarea></div></div>
 
-    <div class="sec"><h3>Produção e edição</h3><div class="sb"><div class="row2">
-      <div class="field"><label>Produtor(a)</label><select data-pf="produtorId" ${ro}>${uopts(p.produtorId, ['produtor', 'chefe', 'admin', 'editor'])}</select></div>
-      <div class="field"><label>Editor(a) de texto</label><input type="text" data-pf="editorTexto" value="${F('editorTexto')}" ${ro}></div>
-    </div></div></div>
+    <div class="sec"><h3>Edição de texto</h3><div class="sb"><div class="field"><label>Editor(a) de texto</label><input type="text" list="dl-etxt" data-pf="editorTexto" value="${F('editorTexto')}" autocomplete="off" ${ro}></div></div></div>
 
     <div class="sec"><h3>Sugestão de perguntas</h3><div class="sb"><textarea data-pf="perguntas" rows="3" ${ro}>${F('perguntas')}</textarea></div></div>
     <div class="sec"><h3>Imagens e Arte</h3><div class="sb"><div class="row2">
@@ -534,6 +544,10 @@ function renderPautaEditor() {
     if (t.dataset.pf === 'status') {
       const qb = $('#queda-box'); if (qb) qb.style.display = p.status === 'caiu' ? '' : 'none';
       if (p.status === 'caiu' && !String(p.motivoQueda || '').trim()) setTimeout(() => { const m = $('[data-pf=motivoQueda]'); if (m) m.focus(); }, 0);
+    }
+    if (t.dataset.team === 'produtor') {
+      const v = t.value.trim(); const u = S.users.find(x => x.name.toLowerCase() === v.toLowerCase());
+      if (u) { p.produtorId = u.id; p.produtorNome = ''; } else { p.produtorId = ''; p.produtorNome = v; }
     }
     if (t.dataset.team === 'reporter') {   // nome da lista vira usuário do sistema; senão fica o nome digitado
       const v = t.value.trim(); const u = S.users.find(x => x.name.toLowerCase() === v.toLowerCase());
@@ -678,11 +692,18 @@ function offerDraftRestore() {
 function teamLists() {
   const uniq = (arr) => [...new Set(arr.map(s => String(s || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
   const used = (k) => (S.pautas || []).map(x => x[k]);
-  const reps = uniq([...S.users.filter(u => u.active && ['reporter', 'apresentador'].includes(u.role)).map(u => u.name), ...used('reporterNome')]);
-  const cine = uniq([...(S.org.cinegrafistas || []), ...used('cinegrafista')]);
-  const mot = uniq([...(S.org.motoristas || []), ...used('motorista')]);
+  const todos = funcionarios();
+  const nomes = (funcoes, roles, campo) => uniq([
+    ...todos.filter(f => funcoes.includes(f.funcao)).map(f => f.nome),
+    ...S.users.filter(u => u.active && roles.includes(u.role)).map(u => u.name),
+    ...(campo ? used(campo) : [])]);
   const dl = (id, list) => `<datalist id="${id}">${list.map(n => `<option value="${esc(n)}"></option>`).join('')}</datalist>`;
-  return dl('dl-rep', reps) + dl('dl-cine', cine) + dl('dl-mot', mot);
+  return dl('dl-prod', nomes(['Produtor', CARGO_DIRETOR], ['produtor', 'diretor'], 'produtorNome'))
+    + dl('dl-rep', nomes(['Repórter', 'Apresentador'], ['reporter', 'apresentador'], 'reporterNome'))
+    + dl('dl-cine', nomes(['Repórter cinematográfico'], [], 'cinegrafista'))
+    + dl('dl-mot', nomes(['Motorista'], [], 'motorista'))
+    + dl('dl-eimg', nomes(['Editor de imagens'], ['editor_imagem'], 'edicaoEditor'))
+    + dl('dl-etxt', nomes(['Editor de texto'], ['editor'], 'editorTexto'));
 }
 // Os quatro pilares da pauta: Retranca, Proposta, Marcação, Informações
 function pautaChecks(p) {
@@ -1053,7 +1074,7 @@ function pautaHtml(p, screen) {
   return `<div>
     ${screen ? '' : `<h1>PAUTA — ${esc(p.retranca)}</h1>`}
     <div>${fmtDate(p.data)} · ${esc(p.editoria || '')} · ${esc(label(PAUTA_STATUS, p.status))} · Formato: ${esc(p.formato || '')}${p.programaId ? ' · ' + esc((S.programs.find(x => x.id === p.programaId) || {}).name || '') : ''}</div>
-    <div>Produção: ${esc(userName(p.produtorId))} · Repórter: ${esc(repName(p))} · Cinegrafista: ${esc(p.cinegrafista || '')} · Motorista: ${esc(p.motorista || '')} · Editor: ${esc(p.editorTexto || '')}</div>
+    <div>Produção: ${esc(prodName(p))} · Repórter: ${esc(repName(p))} · Cinegrafista: ${esc(p.cinegrafista || '')} · Motorista: ${esc(p.motorista || '')} · Editor de imagens: ${esc(p.edicaoEditor || '')} · Editor: ${esc(p.editorTexto || '')}</div>
     <div>Horário: ${esc(p.horario || '')} · Local: ${esc(p.local || '')} ${p.endereco ? '— ' + esc(p.endereco) : ''}</div>
     ${rot.length ? `<h2${screen ? ' style="font-size:12px;color:var(--accent);margin:14px 0 4px"' : ''}>ROTEIRO DE GRAVAÇÃO</h2><table class="${screen ? 'grid' : ''}"><tr><th>Hora</th><th>Local</th><th>O que gravar</th></tr>${rot.map(r => `<tr><td>${esc(r.hora)}</td><td>${esc(r.local)}</td><td>${esc(r.acao)}</td></tr>`).join('')}</table>` : ''}
     ${p.status === 'caiu' ? block('Motivo da queda', p.motivoQueda || '—') : ''}
@@ -1117,7 +1138,7 @@ function printDoc(p, mode, download) {
   const pautaPart = () => `<div class="doc">${head('PAUTA')}
     ${meta([['Editoria', p.editoria], ['Formato', p.formato], ['Status', label(PAUTA_STATUS, p.status)],
       ['Repórter', repName(p)], ['Cinegrafista', p.cinegrafista], ['Motorista', p.motorista],
-      ['Produção', userName(p.produtorId)], ['Editor de texto', p.editorTexto], ['Saída / início', p.horario],
+      ['Produção', prodName(p)], ['Editor de texto', p.editorTexto], ['Editor de imagens', p.edicaoEditor], ['Saída / início', p.horario],
       ['Prioridade', label(PRIORIDADES, p.prioridade)]])}
     ${p.status === 'caiu' ? sec('Motivo da queda', txt(p.motivoQueda || '—')) : ''}
     ${sec('Proposta', txt(p.proposta))}
@@ -1263,7 +1284,7 @@ async function downloadPdf(p, mode, brandHex, fileName, footL, footR) {
       header('PAUTA');
       metaTable([['Editoria', p.editoria], ['Formato', p.formato], ['Status', label(PAUTA_STATUS, p.status)],
         ['Repórter', repName(p)], ['Cinegrafista', p.cinegrafista], ['Motorista', p.motorista],
-        ['Produção', userName(p.produtorId)], ['Editor de texto', p.editorTexto], ['Saída / início', p.horario],
+        ['Produção', prodName(p)], ['Editor de texto', p.editorTexto], ['Editor de imagens', p.edicaoEditor], ['Saída / início', p.horario],
         ['Prioridade', label(PRIORIDADES, p.prioridade)]]);
       if (p.status === 'caiu') section('Motivo da queda', p.motivoQueda || '—');
       section('Proposta', p.proposta);
@@ -2024,7 +2045,7 @@ async function viewBusca() {
           <span class="mono hint">${fmtDate(p.data)}</span>
           <span class="pill st-${p.status}">${esc(label(PAUTA_STATUS, p.status))}</span>
           ${materiaPill(p)}
-          <span class="hint">${esc(p.editoria || '')}${p.reporterId ? ' · Repórter: ' + esc(repName(p)) : ''}${p.produtorId ? ' · Produção: ' + esc(userName(p.produtorId)) : ''}</span></div>
+          <span class="hint">${esc(p.editoria || '')}${p.reporterId ? ' · Repórter: ' + esc(repName(p)) : ''}${prodName(p) ? ' · Produção: ' + esc(prodName(p)) : ''}</span></div>
         <div class="r-s">${snippet(p, terms)}</div>
       </article>`).join('') : '<div class="empty">Nada encontrado. Tente outras palavras ou amplie as datas.</div>');
   };
@@ -2212,15 +2233,17 @@ async function viewEquipe() {
         <div class="field"><label>Função</label><select name="role">${opts(S.roles.map(r => [r.id, r.label]), 'reporter')}</select></div>
         <div><button class="btn primary">Adicionar</button></div>
       </form>
-      <p class="hint">Permissões: <b>Administrador</b> gerencia equipe e tudo mais · <b>Chefe de reportagem</b> e <b>Editor</b> fecham e aprovam espelhos · <b>Produtor</b> cria e exclui pautas · <b>Repórter</b> e <b>Apresentador</b> editam pautas e laudas.</p>
+      <p class="hint">Permissões: <b>Administrador</b> gerencia equipe e tudo mais · <b>Diretor de Produção e Multimídia</b> gerencia telejornais e funcionários, aprova espelhos e exclui pautas · <b>Chefe de reportagem</b> e <b>Editor</b> fecham e aprovam espelhos · <b>Produtor</b> cria e exclui pautas · <b>Repórter</b> e <b>Apresentador</b> editam pautas e laudas.</p>
     </div></div>` : ''}
-    ${S.perms.managePrograms ? `<div class="card"><div class="pad"><h3 style="margin-top:0">Equipe técnica</h3>
-      <p class="hint" style="margin-top:0">Nomes sugeridos nos campos <b>Cinegrafista</b> e <b>Motorista</b> da pauta. Um nome por linha. Na pauta também dá para digitar um nome que não está na lista. Os repórteres sugeridos vêm da tabela acima.</p>
-      <div class="row2">
-        <div class="field"><label>Repórteres cinematográficos</label><textarea id="eq-cine" rows="6" placeholder="João Batista&#10;Marcos Lima">${esc((S.org.cinegrafistas || []).join('\n'))}</textarea></div>
-        <div class="field"><label>Motoristas</label><textarea id="eq-mot" rows="6" placeholder="Carlos Souza&#10;Pedro Alves">${esc((S.org.motoristas || []).join('\n'))}</textarea></div>
-      </div>
-      <button class="btn primary" id="eq-save" type="button">Salvar equipe técnica</button>
+    ${S.perms.managePrograms ? `<div class="card"><div class="pad"><h3 style="margin-top:0">Funcionários</h3>
+      <p class="hint" style="margin-top:0">Cadastre quem trabalha na redação e a função de cada pessoa. Os nomes aparecem como sugestão nos campos de <b>Equipe</b> da pauta, onde também dá para escrever um nome à mão. Não cria acesso ao sistema.</p>
+      <form id="fn-add" class="fn-form" autocomplete="off">
+        <div class="field"><label>Nome</label><input type="text" name="nome" maxlength="80" required placeholder="Nome e sobrenome"></div>
+        <div class="field"><label>Função</label><input type="text" name="funcao" list="dl-funcoes" maxlength="80" required placeholder="Escolha ou escreva a função"></div>
+        <button class="btn primary">Adicionar funcionário</button>
+      </form>
+      <datalist id="dl-funcoes">${FUNCOES.map(x => `<option value="${esc(x)}"></option>`).join('')}</datalist>
+      <div id="fn-list"></div>
     </div></div>` : ''}
     ${adm ? `<div class="card"><div class="pad"><h3 style="margin-top:0">Identidade da emissora</h3>
       <p class="hint" style="margin-top:0">Logotipo, cor e rodapé usados na impressão e no PDF de pautas e matérias.</p>
@@ -2237,11 +2260,35 @@ async function viewEquipe() {
           <div class="formbar"><button class="btn primary" id="br-save" type="button">Salvar identidade</button><span class="hint">Veja o resultado em Pautas → Imprimir ou em Matérias → Imprimir / PDF.</span></div>
         </div>
       </div></div></div>` : ''}</div>`;
-  const eqs = $('#eq-save'); if (eqs) eqs.onclick = async () => {
-    const lines = (id) => $(id).value.split('\n').map(s => s.trim()).filter(Boolean);
-    try { S.org = Object.assign(S.org, await api('PUT', '/api/org/equipe', { cinegrafistas: lines('#eq-cine'), motoristas: lines('#eq-mot') })); toast('Equipe técnica salva.'); }
-    catch (er) { toast(er.message, true); }
-  };
+  if (S.perms.managePrograms) {
+    let lista = funcionarios();
+    const draw = () => {
+      const ord = lista.map((f, i) => ({ ...f, i })).sort((a, b) => a.funcao.localeCompare(b.funcao, 'pt-BR') || a.nome.localeCompare(b.nome, 'pt-BR'));
+      $('#fn-list').innerHTML = ord.length ? `<table class="grid"><thead><tr><th>Nome</th><th>Função</th><th></th></tr></thead><tbody>
+        ${ord.map(f => `<tr data-i="${f.i}"><td><b>${esc(f.nome)}</b></td><td><input type="text" list="dl-funcoes" value="${esc(f.funcao)}" maxlength="80" aria-label="Função de ${esc(f.nome)}"></td><td><button class="btn sm danger" type="button" data-fndel>Remover</button></td></tr>`).join('')}
+        </tbody></table>` : '<div class="hint">Nenhum funcionário cadastrado ainda.</div>';
+    };
+    const save = async (nova, ok) => {
+      try { S.org = Object.assign(S.org, await api('PUT', '/api/org/equipe', { funcionarios: nova, cinegrafistas: [], motoristas: [] })); lista = funcionarios(); draw(); toast(ok); return true; }
+      catch (er) { toast(er.message, true); draw(); return false; }
+    };
+    draw();
+    $('#fn-add').onsubmit = async (e) => {
+      e.preventDefault(); const form = e.target;
+      const nome = form.nome.value.trim(), funcao = form.funcao.value.trim(); if (!nome || !funcao) return;
+      if (lista.some(f => f.nome.toLowerCase() === nome.toLowerCase() && f.funcao.toLowerCase() === funcao.toLowerCase())) return toast('Essa pessoa já está cadastrada nessa função.', true);
+      if (await save([...lista, { nome, funcao }], 'Funcionário adicionado.')) { form.reset(); form.nome.focus(); }
+    };
+    $('#fn-list').onchange = (e) => {
+      e.stopPropagation(); const i = +e.target.closest('tr').dataset.i, funcao = e.target.value.trim();
+      if (!funcao) return draw();
+      save(lista.map((f, n) => n === i ? { nome: f.nome, funcao } : f), 'Função atualizada.');
+    };
+    $('#fn-list').onclick = (e) => {
+      if (!e.target.matches('[data-fndel]')) return; const i = +e.target.closest('tr').dataset.i;
+      if (confirm(`Remover ${lista[i].nome} (${lista[i].funcao}) do cadastro?`)) save(lista.filter((_, n) => n !== i), 'Funcionário removido.');
+    };
+  }
   if (!adm) return;
   // identidade visual
   let brLogo = S.org.logo || '';

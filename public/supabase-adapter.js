@@ -4,13 +4,13 @@
 'use strict';
 
 window.createSupabaseAdapter = function (sb) {
-  const ROLES = ['admin', 'chefe', 'editor', 'produtor', 'reporter', 'apresentador', 'editor_imagem'];
-  const ROLE_LABEL = { admin: 'Administrador', chefe: 'Chefe de reportagem', editor: 'Editor', produtor: 'Produtor', reporter: 'Repórter', apresentador: 'Apresentador', editor_imagem: 'Editor de imagens' };
+  const ROLES = ['admin', 'chefe', 'editor', 'produtor', 'reporter', 'apresentador', 'editor_imagem', 'diretor'];
+  const ROLE_LABEL = { admin: 'Administrador', chefe: 'Chefe de reportagem', editor: 'Editor', produtor: 'Produtor', reporter: 'Repórter', apresentador: 'Apresentador', editor_imagem: 'Editor de imagens', diretor: 'Diretor de Produção e Multimídia' };
   const CAN = {
-    manageUsers: ['admin'], managePrograms: ['admin', 'chefe'],
-    editRundown: ROLES, approveRundown: ['admin', 'chefe', 'editor'], deletePauta: ['admin', 'chefe', 'produtor'],
+    manageUsers: ['admin'], managePrograms: ['admin', 'chefe', 'diretor'],
+    editRundown: ROLES, approveRundown: ['admin', 'chefe', 'editor', 'diretor'], deletePauta: ['admin', 'chefe', 'produtor', 'diretor'],
   };
-  const PAUTA_FIELDS = ['retranca', 'data', 'editoria', 'status', 'prioridade', 'programaId', 'formato', 'produtorId', 'reporterId', 'reporterNome', 'cinegrafista', 'motorista', 'editorTexto',
+  const PAUTA_FIELDS = ['retranca', 'data', 'editoria', 'status', 'prioridade', 'programaId', 'formato', 'produtorId', 'produtorNome', 'reporterId', 'reporterNome', 'cinegrafista', 'motorista', 'editorTexto',
     'horario', 'local', 'endereco', 'proposta', 'historico', 'encaminhamento', 'perguntas', 'imagens', 'arte', 'observacoes', 'entrevistados', 'roteiro', 'tags', 'materia', 'materiaStatus', 'motivoQueda', 'edicaoStatus', 'edicaoEditor', 'edicaoObs'];
   const ITEM_FIELDS = ['retranca', 'tipo', 'apresentador', 'reporter', 'editor', 'cabeca', 'deixa', 'texto', 'gc', 'tempoVT', 'tempoCabManual', 'status', 'obs', 'pautaId', 'flagged', 'pagina'];
   const PROGRAM_FIELDS = ['name', 'sigla', 'inicio', 'duracao', 'wpm', 'apresentadores', 'ativo'];
@@ -144,7 +144,7 @@ window.createSupabaseAdapter = function (sb) {
     return org;
   });
   on('PUT', '/api/org/equipe', async (b) => {
-    check(await sb.rpc('set_equipe_tecnica', { p_cinegrafistas: b.cinegrafistas || [], p_motoristas: b.motoristas || [] }));
+    check(await sb.rpc('set_funcionarios', { p_lista: b.funcionarios || [] }));
     return fromDb(check(await sb.from('orgs').select('*').eq('id', me.orgId).single()));
   });
   on('PUT', '/api/me/password', async (b) => {

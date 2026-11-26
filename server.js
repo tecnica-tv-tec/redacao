@@ -45,26 +45,26 @@ function checkPassword(pw, stored) {
 }
 
 // ---------------------------------------------------------------- domínio
-const ROLES = ['admin', 'chefe', 'editor', 'produtor', 'reporter', 'apresentador', 'editor_imagem'];
-const ROLE_LABEL = { admin: 'Administrador', chefe: 'Chefe de reportagem', editor: 'Editor', produtor: 'Produtor', reporter: 'Repórter', apresentador: 'Apresentador', editor_imagem: 'Editor de imagens' };
+const ROLES = ['admin', 'chefe', 'editor', 'produtor', 'reporter', 'apresentador', 'editor_imagem', 'diretor'];
+const ROLE_LABEL = { admin: 'Administrador', chefe: 'Chefe de reportagem', editor: 'Editor', produtor: 'Produtor', reporter: 'Repórter', apresentador: 'Apresentador', editor_imagem: 'Editor de imagens', diretor: 'Diretor de Produção e Multimídia' };
 const CAN = {
   manageUsers: ['admin'],
-  managePrograms: ['admin', 'chefe'],
-  editRundown: ['admin', 'chefe', 'editor', 'produtor', 'reporter', 'apresentador', 'editor_imagem'],
-  approveRundown: ['admin', 'chefe', 'editor'],
-  deletePauta: ['admin', 'chefe', 'produtor'],
+  managePrograms: ['admin', 'chefe', 'diretor'],
+  editRundown: ['admin', 'chefe', 'editor', 'produtor', 'reporter', 'apresentador', 'editor_imagem', 'diretor'],
+  approveRundown: ['admin', 'chefe', 'editor', 'diretor'],
+  deletePauta: ['admin', 'chefe', 'produtor', 'diretor'],
 };
 const can = (user, perm) => CAN[perm].includes(user.role);
 
 const PAUTA_FIELDS = ['retranca', 'data', 'editoria', 'status', 'prioridade', 'programaId', 'formato',
-  'produtorId', 'reporterId', 'reporterNome', 'cinegrafista', 'motorista', 'editorTexto', 'horario', 'local', 'endereco',
+  'produtorId', 'produtorNome', 'reporterId', 'reporterNome', 'cinegrafista', 'motorista', 'editorTexto', 'horario', 'local', 'endereco',
   'proposta', 'historico', 'encaminhamento', 'perguntas', 'imagens', 'arte', 'observacoes', 'entrevistados', 'roteiro', 'tags',
   'materia', 'materiaStatus', 'motivoQueda', 'edicaoStatus', 'edicaoEditor', 'edicaoObs'];
 // busca sem diferenciar acentos e maiúsculas
 const fold = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 function pautaSearchText(p) {
   const ents = (p.entrevistados || []).map(e => [e.nome, e.funcao, e.local].join(' ')).join(' ');
-  return fold([p.retranca, p.proposta, p.historico, p.encaminhamento, p.materia, p.local, p.endereco, p.tags, p.editoria, p.perguntas, p.observacoes, p.reporterNome, p.cinegrafista, p.motorista, ents].join(' '));
+  return fold([p.retranca, p.proposta, p.historico, p.encaminhamento, p.materia, p.local, p.endereco, p.tags, p.editoria, p.perguntas, p.observacoes, p.reporterNome, p.produtorNome, p.cinegrafista, p.motorista, p.edicaoEditor, ents].join(' '));
 }
 const ITEM_FIELDS = ['retranca', 'tipo', 'apresentador', 'reporter', 'editor', 'cabeca', 'deixa', 'texto', 'gc',
   'tempoVT', 'tempoCabManual', 'status', 'obs', 'pautaId', 'videoId', 'flagged', 'pagina'];
@@ -289,7 +289,9 @@ route('PUT', '/api/org/equipe', async (req, res, { user, body }) => {
   const clean = (v) => [...new Set((Array.isArray(v) ? v : []).map(s => String(s).trim()).filter(Boolean))].slice(0, 200).map(s => s.slice(0, 80));
   if (body.cinegrafistas !== undefined) org.cinegrafistas = clean(body.cinegrafistas);
   if (body.motoristas !== undefined) org.motoristas = clean(body.motoristas);
-  log(user.orgId, user, 'equipe', 'Atualizou cinegrafistas e motoristas'); save();
+  if (body.funcionarios !== undefined) org.funcionarios = (Array.isArray(body.funcionarios) ? body.funcionarios : []).slice(0, 500)
+    .map(f => ({ nome: String((f && f.nome) || '').trim().slice(0, 80), funcao: String((f && f.funcao) || '').trim().slice(0, 80) })).filter(f => f.nome && f.funcao);
+  log(user.orgId, user, 'equipe', 'Atualizou o cadastro de funcionários'); save();
   send(res, 200, org);
 });
 
