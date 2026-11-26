@@ -718,14 +718,35 @@ textarea.mat-text { flex: 1; min-height: 320px; margin: 12px 18px; width: auto; 
 .docview.pdf-render .doc-script td:empty { display: none; }
 
 /* ---------- capa da pauta ---------- */
-.capa-modal .modal { max-width: 900px; }
-.capa-form { display: grid; grid-template-columns: auto 1fr; gap: 8px 20px; align-items: end; padding: 4px 0 12px; }
-.capa-form .capa-obs { grid-column: 1 / -1; }
-.capa-view { border-radius: 8px; padding: 16px; }
-.capa-view .doc-logo img { max-width: 170px; max-height: 70px; }
+.capa-modal .modal { max-width: 1120px; height: 90vh; }
+.capa-modal .modal-b { display: flex; flex-direction: column; min-height: 0; flex: 1; overflow: hidden; }
+.cp { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 20px; flex: 1; min-height: 0; }
+.cp-form, .cp-previa { overflow: auto; min-height: 0; padding-right: 4px; }
+.cp-form .btn { align-self: flex-start; }
+#capa-campos { display: flex; flex-direction: column; gap: 12px; }
+#capa-campos .field { margin: 0; }
+#capa-campos .field label { display: grid; gap: 4px; }
+#capa-campos input, #capa-campos select { height: 36px; }
+.cp-card { border: 1px solid var(--line-2); border-radius: 12px; background: var(--panel-2); padding: 8px 14px 14px; margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.cp-card legend { padding: 0 6px; color: var(--accent); font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+.cp-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.cp-full { grid-column: 1 / -1; }
+.cp-novo { margin-top: 4px; }
+.cp-novo[hidden] { display: none; }
+.cp-add { display: flex; flex-wrap: wrap; gap: 8px; }
+.cp-papel { border-radius: 10px; padding: 20px; margin-top: 6px; }
+.cp-aviso { margin-right: auto; }
+.cp-top img { max-width: 150px; max-height: 60px; }
+.cp-titulo { font: 800 16px Arial, sans-serif; color: var(--brand); border-bottom: 3px solid var(--brand); padding-bottom: 6px; margin: 10px 0 14px; }
+.cp-bloco { margin-bottom: 14px; line-height: 1.55; break-inside: avoid; overflow-wrap: anywhere; }
+#print-area .cp-top img { max-width: 46mm; max-height: 18mm; }
+#print-area .cp-titulo { font-size: 15pt; }
 @media (max-width: 760px) {
-  .capa-form { grid-template-columns: 1fr; padding: 12px; }
-  .capa-view { border-radius: 0; }
+  .capa-modal .modal-b { display: block; overflow: auto; }
+  .cp { grid-template-columns: 1fr; padding: 12px; }
+  .cp-form, .cp-previa { overflow: visible; padding: 0; }
+  #capa-campos input, #capa-campos select { height: 44px; }
+  .cp-aviso { flex-basis: 100%; }
 }
 
 #print-area .list-logo { display: block; max-width: 46mm; max-height: 20mm; margin-bottom: 8px; }
