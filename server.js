@@ -54,7 +54,18 @@ const CAN = {
   approveRundown: ['admin', 'chefe', 'editor', 'diretor'],
   deletePauta: ['admin', 'chefe', 'produtor', 'diretor'],
 };
-const can = (user, perm) => CAN[perm].includes(user.role);
+// LICENÇAS (definidas pelo administrador em Equipe):
+// leitura = só consulta, PDF e impressão · edicao = cria/edita pautas e matérias · geral = tudo + espelho
+const LICENCAS = ['leitura', 'edicao', 'geral'];
+const licencaDe = (u) => u.role === 'admin' ? 'geral' : (LICENCAS.includes(u.licenca) ? u.licenca : 'geral');
+const DO_ESPELHO = ['editRundown', 'approveRundown', 'managePrograms'];
+const can = (user, perm) => {
+  const l = licencaDe(user);
+  if (l === 'leitura' || (l === 'edicao' && DO_ESPELHO.includes(perm))) return false;
+  return CAN[perm].includes(user.role);
+};
+const permsDe = (u) => Object.assign(Object.fromEntries(Object.keys(CAN).map(k => [k, can(u, k)])),
+  { licenca: licencaDe(u), edit: licencaDe(u) !== 'leitura', rundown: licencaDe(u) === 'geral' });
 
 const PAUTA_FIELDS = ['retranca', 'data', 'editoria', 'status', 'prioridade', 'programaId', 'formato',
   'produtorId', 'produtorNome', 'reporterId', 'reporterNome', 'cinegrafista', 'motorista', 'editorTexto', 'horario', 'local', 'endereco',
@@ -75,7 +86,7 @@ function pick(src, fields) {
   return out;
 }
 function publicUser(u) {
-  return { id: u.id, name: u.name, email: u.email, role: u.role, roleLabel: ROLE_LABEL[u.role], active: u.active !== false, createdAt: u.createdAt };
+  return { id: u.id, name: u.name, email: u.email, role: u.role, roleLabel: ROLE_LABEL[u.role], licenca: licencaDe(u), active: u.active !== false, createdAt: u.createdAt };
 }
 function log(orgId, user, action, detail) {
   db.logs.push({ id: uid(), orgId, userId: user ? user.id : null, userName: user ? user.name : 'sistema', action, detail, at: now() });
@@ -262,7 +273,7 @@ route('POST', '/api/auth/logout', async (req, res) => {
 route('GET', '/api/me', async (req, res, { user }) => {
   const org = db.orgs.find(o => o.id === user.orgId);
   send(res, 200, { user: publicUser(user), org, roles: ROLES.map(r => ({ id: r, label: ROLE_LABEL[r] })),
-    perms: Object.fromEntries(Object.keys(CAN).map(k => [k, can(user, k)])) });
+    perms: permsDe(user) });
 });
 
 // --- dados da emissora (nome, logotipo e layout de impressão)
@@ -312,7 +323,7 @@ route('POST', '/api/users', async (req, res, { user, body }) => {
   if (!name || !email || !password || !ROLES.includes(role)) return err(res, 400, 'Dados inválidos.');
   if (String(password).length < 8) return err(res, 400, 'A senha deve ter pelo menos 8 caracteres.');
   if (db.users.some(u => u.email === email.toLowerCase())) return err(res, 409, 'E-mail já cadastrado.');
-  const u = { id: uid(), orgId: user.orgId, name, email: email.toLowerCase(), password: hashPassword(password), role, active: true, createdAt: now() };
+  const u = { id: uid(), orgId: user.orgId, name, email: email.toLowerCase(), password: hashPassword(password), role, licenca: LICENCAS.includes(body.licenca) ? body.licenca : 'leitura', active: true, createdAt: now() };
   db.users.push(u); log(user.orgId, user, 'usuario', `Criou ${name}`); save();
   send(res, 201, publicUser(u));
 });
@@ -325,6 +336,7 @@ route('PUT', '/api/users/:id', async (req, res, { user, body, params }) => {
     if (u.id === user.id && body.role !== 'admin') return err(res, 400, 'Você não pode remover seu próprio acesso de administrador.');
     u.role = body.role;
   }
+  if (body.licenca && LICENCAS.includes(body.licenca) && body.licenca !== u.licenca) { u.licenca = body.licenca; log(user.orgId, user, 'usuario', `Licença de ${u.name}: ${body.licenca}`); }
   if (typeof body.active === 'boolean') {
     if (u.id === user.id && !body.active) return err(res, 400, 'Você não pode desativar a si mesmo.');
     u.active = body.active;
@@ -608,6 +620,12 @@ const server = http.createServer(async (req, res) => {
     const params = {}; r.keys.forEach((k, n) => { params[k] = m[n + 1]; });
     const user = currentUser(req);
     if (r.auth && !user) return err(res, 401, 'Sessão expirada. Faça login novamente.');
+    // bloqueio por licença (vale para qualquer rota que grava)
+    if (r.auth && !/^\/api\/(auth|me)\b/.test(pathname) && (req.method !== 'GET' || url.searchParams.get('create') === '1')) {
+      const p = permsDe(user);
+      if (!p.edit) return err(res, 403, 'Sua licença é de leitura: você pode consultar, baixar PDF e imprimir.');
+      if (/^\/api\/(rundowns|items|programs)\b/.test(pathname) && !p.rundown) return err(res, 403, 'O espelho exige a licença Geral. Fale com o administrador.');
+    }
     let body = {};
     if (req.method !== 'GET') { try { body = await readBody(req); } catch { return err(res, 400, 'Requisição inválida.'); } }
     try { return await r.handler(req, res, { user, params, body, query: Object.fromEntries(url.searchParams) }); }

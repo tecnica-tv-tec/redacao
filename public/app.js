@@ -104,6 +104,8 @@ const materiaPill = (p) => String(p.materia || '').trim()
   ? `<span class="pill st-${MAT_CLASS[p.materiaStatus] || 'em_apuracao'}" title="${wordCount(p.materia)} palavras">✎ ${esc(label(MATERIA_STATUS, p.materiaStatus || 'rascunho'))}</span>`
   : '<span class="hint">—</span>';
 const MOTIVOS_QUEDA = ['Entrevistado desmarcou', 'Fato perdeu relevância', 'Equipe deslocada para factual', 'Sem autorização de imagem', 'Clima / chuva', 'Falta de equipe ou carro', 'Pauta derrubada pela chefia'];
+const LICENCAS = [['leitura', 'Leitura'], ['edicao', 'Edição'], ['geral', 'Geral']];
+const isMobile = () => window.matchMedia('(max-width: 760px)').matches;
 const PRIORIDADES = [['baixa', 'Baixa'], ['normal', 'Normal'], ['alta', 'Alta'], ['urgente', 'Urgente']];
 const FORMATOS = ['VT', 'NC', 'NOTA', 'NP', 'LINK', 'SONORA', 'STAND-UP', 'ENTREVISTA', 'SÉRIE', 'ARTE'];
 const TIPOS = ['ESCALADA', 'VINHETA', 'CABEÇA', 'NOTA', 'NC', 'NP', 'VT', 'VT+NP', 'SONORA', 'LINK', 'VIVO', 'STAND-UP', 'ENTREVISTA', 'ENTREVISTA ESTÚDIO', 'ARTE', 'CHAMADA', 'PASSAGEM', 'ENCERRAMENTO', 'INTERVALO'];
@@ -244,10 +246,10 @@ async function boot() {
 function renderShell() {
   const nav = [['pautas', 'Pautas'], ['materias', 'Matérias'], ['edicao', 'Edição'], ['calendario', 'Calendário'], ['espelho', 'Espelho'], ['busca', 'Busca'], ['relatorios', 'Relatórios'], ['programas', 'Telejornais'], ['equipe', 'Equipe'], ['log', 'Atividade']];
   $('#app').innerHTML = `
-  <div class="shell">
+  <div class="shell ${S.perms.edit ? '' : 'lic-leitura'}">
     <header class="topbar">
       <div class="brand"><span class="dot"></span> REDAÇÃO</div>
-      <nav class="nav">${nav.map(([k, l]) => `<button data-go="${k}">${l}</button>`).join('')}</nav>
+      <nav class="nav">${nav.filter(([k]) => k !== 'espelho' || S.perms.rundown).map(([k, l]) => `<button data-go="${k}">${l}</button>`).join('')}</nav>
       <div class="spacer"></div>
       <form id="gsearch-f" class="gsearch" role="search"><input type="search" id="gsearch" placeholder="Buscar pautas e matérias…" aria-label="Buscar pautas e matérias"></form>
       <span class="org">${esc(S.org.name)}</span>
@@ -269,7 +271,7 @@ function renderShell() {
 function userMenu() {
   const old = $('.menu'); if (old) return old.remove();
   const m = document.createElement('div'); m.className = 'menu';
-  m.innerHTML = `<div class="who"><b>${esc(S.me.name)}</b><div class="hint">${esc(S.me.email)} · ${esc(S.me.roleLabel)}</div></div>
+  m.innerHTML = `<div class="who"><b>${esc(S.me.name)}</b><div class="hint">${esc(S.me.email)} · ${esc(S.me.roleLabel)}</div><div class="hint">Licença: <b>${esc(label(LICENCAS, S.perms.licenca))}</b></div></div>
     <button data-a="pw">Alterar senha</button><button data-a="out">Sair</button>`;
   document.body.appendChild(m);
   const off = (e) => { if (!m.contains(e.target) && !e.target.closest('#userchip')) { m.remove(); document.removeEventListener('click', off); } };
@@ -303,6 +305,7 @@ async function go(view) {
     await releaseLocks();
     S.pautaDirty = false;
   }
+  if (view === 'espelho' && !S.perms.rundown) { view = 'pautas'; toast('O espelho exige a licença Geral. Fale com o administrador.', true); }
   S.view = view; history.replaceState(null, '', '#' + view);
   $$('[data-go]').forEach(b => b.classList.toggle('on', b.dataset.go === view));
   stopPolling();
@@ -359,6 +362,7 @@ async function viewPautas() {
       </div>
     </aside>
     <section class="pane"><div class="pane-h"><h2>Pautas</h2><span class="hint" id="pf-label"></span><div style="flex:1"></div>
+        <button class="btn sm mob-only" id="pf-toggle" aria-expanded="false">Filtros</button>
         <button class="btn sm" id="pf-print">Imprimir lista</button><button class="btn primary sm" id="pf-new">+ Nova pauta</button></div>
       <div class="pane-b" id="pauta-list"></div></section>
     <section class="pane editor" id="pauta-editor"></section>
@@ -375,18 +379,19 @@ async function viewPautas() {
   $('#pf-prog').onchange = e => set('programaId', e.target.value);
   $('#pf-mine').onchange = e => set('mine', e.target.checked);
   $('#pf-new').onclick = () => openPauta(null);
+  $('#pf-toggle').onclick = (e) => { const on = $('.ws-pautas').classList.toggle('show-filters'); e.target.setAttribute('aria-expanded', on); };
   $('#pf-print').onclick = printPautaList;
-  $('#pauta-list').onclick = e => { const tr = e.target.closest('tr[data-id]'); if (tr) openPauta(tr.dataset.id); };
+  $('#pauta-list').onclick = e => { const r = e.target.closest('[data-id]'); if (r) (isMobile() ? openFicha : openPauta)(r.dataset.id); };
   await reload();
   renderPautaEditor();
-  offerDraftRestore();
+  if (S.perms.edit) offerDraftRestore();
   S.pollTimer = setInterval(async () => { if (S.view !== 'pautas') return; try { await loadPautas(); renderPautaList(); } catch { } }, 8000);
 }
 function renderPautaList() {
   const el = $('#pauta-list'); if (!el) return;
   $('#pf-label').textContent = S.pf.allDates ? 'todas as datas' : `${weekday(S.pf.date)}, ${fmtDate(S.pf.date)}`;
   $('#pf-count').textContent = `${S.pautas.length} pauta(s) encontrada(s)`;
-  if (!S.pautas.length) { el.innerHTML = `<div class="empty">Nenhuma pauta para este filtro.<br><br><button class="btn primary" onclick="openPauta(null)">Criar pauta</button></div>`; return; }
+  if (!S.pautas.length) { el.innerHTML = `<div class="empty">Nenhuma pauta para este filtro.${S.perms.edit ? '<br><br><button class="btn primary" onclick="openPauta(null)">Criar pauta</button>' : ''}</div>`; return; }
   const selId = S.pauta && S.pauta.id;
   el.innerHTML = `<table class="grid"><thead><tr><th></th><th>Retranca</th><th title="Retranca · Proposta · Marcação · Informações">R P M I</th><th>Status</th><th>Editoria</th><th>Repórter</th><th>Hora</th>${S.pf.allDates ? '<th>Data</th>' : ''}<th>Formato</th><th>Matéria</th></tr></thead><tbody>
   ${S.pautas.map(p => `<tr class="row ${p.id === selId ? 'sel' : ''}" data-id="${p.id}">
@@ -397,7 +402,8 @@ function renderPautaList() {
     <td>${esc(p.editoria)}</td><td>${esc(repName(p))}</td><td class="mono">${esc(p.horario)}</td>
     ${S.pf.allDates ? `<td class="mono">${fmtDate(p.data)}</td>` : ''}<td><span class="tipo">${esc(p.formato || '')}</span></td>
     <td>${materiaPill(p)}</td></tr>`).join('')}
-  </tbody></table>`;
+  </tbody></table>
+  <div class="pcards">${S.pautas.map(pautaCard).join('')}</div>`;
 }
 async function openPauta(id) {
   if (S.pautaDirty && !(await autosavePauta()) && !confirm('A pauta atual ainda não pôde ser salva no sistema. Ela fica guardada como rascunho neste navegador. Continuar?')) return;
@@ -426,6 +432,11 @@ window.openPauta = openPauta;
 function renderPautaEditor() {
   const el = $('#pauta-editor'); if (!el) return;
   const p = S.pauta;
+  const ws = $('.ws-pautas'); if (ws) ws.classList.toggle('show-editor', !!p);
+  if (p && !S.perms.edit) {   // licença de leitura: ficha de consulta
+    el.innerHTML = `<div class="pane-h"><button class="btn sm mob-only" id="p-back">‹ Voltar</button><h2>Consulta da pauta</h2><div style="flex:1"></div><button class="btn primary sm" id="p-print">Baixar PDF / Imprimir</button></div><div class="pane-b">${fichaHtml(p)}</div>`;
+    $('#p-print').onclick = () => printPauta(p); $('#p-back').onclick = fecharEditor; return;
+  }
   if (!p) { el.innerHTML = `<div class="pane-h"><h2>Pauta</h2></div><div class="empty">Selecione uma pauta na lista ou crie uma nova.<br><br><span class="hint">Atalho: Ctrl+S salva a pauta aberta.</span></div>`; return; }
   const lockedBy = p.lock && !p.lock.mine ? p.lock.name : null;
   const ro = lockedBy ? 'disabled' : '';
@@ -586,23 +597,24 @@ function renderPautaEditor() {
   bindPautaHead(p);
 }
 function pautaHeadHtml(p, ro) {
-  return `<div class="pane-h"><h2>${p.id ? 'Pauta' : 'Nova pauta'}</h2>
+  return `<div class="pane-h"><button class="btn sm mob-only" id="p-back">‹ Voltar</button><h2>${p.id ? 'Pauta' : 'Nova pauta'}</h2>
     <span class="savestate ${S.pautaDirty ? 'dirty' : ''}" id="pstate">${S.pautaDirty ? 'Alterações não salvas' : p.id ? 'Salva' : 'Não salva'}</span>
     <div class="formbar">
       <button class="btn primary sm" id="p-save" ${ro}>Salvar</button>
       <button class="btn sm" id="p-mat" title="Abrir o espaço de redação da matéria">✎ Matéria</button>
-      ${p.id ? `<button class="btn sm" id="p-send">Enviar ao espelho</button><button class="btn sm" id="p-dup">Duplicar</button><button class="btn sm" id="p-print">Imprimir / PDF</button>
+      ${p.id ? `${S.perms.rundown ? '<button class="btn sm" id="p-send">Enviar ao espelho</button>' : ''}<button class="btn sm" id="p-dup">Duplicar</button><button class="btn sm" id="p-print">Imprimir / PDF</button>
       ${S.perms.deletePauta ? `<button class="btn sm danger" id="p-del" ${ro}>Excluir</button>` : ''}` : ''}
     </div></div>`;
 }
 function bindPautaHead(p) {
   $('#p-save').onclick = savePauta;
+  const back = $('#p-back'); if (back) back.onclick = fecharEditor;
   $('#p-mat').onclick = async () => {
     if (p.id && S.pautaDirty) await autosavePauta();
     if (p.id && !S.pautaDirty) { S.matOpenId = p.id; S.mf = Object.assign(S.mf || {}, { date: p.data, allDates: false }); return go('materias'); }
     const m = $('#materia'); m.scrollIntoView({ behavior: 'smooth', block: 'start' }); setTimeout(() => $('[data-pf=materia]').focus({ preventScroll: true }), 350); };
   if (p.id) {
-    $('#p-send').onclick = async () => { if (S.pautaDirty) await autosavePauta(); sendToRundown(p); };
+    const send = $('#p-send'); if (send) send.onclick = async () => { if (S.pautaDirty) await autosavePauta(); sendToRundown(p); };
     $('#p-dup').onclick = async () => { if (S.pautaDirty && !(await autosavePauta()) && !confirm('Descartar alterações?')) return; S.pautaDirty = false; releaseLocks();
       const copy = JSON.parse(JSON.stringify(p)); ['id', 'createdAt', 'updatedAt', 'createdBy', 'updatedBy', 'usos', 'lock'].forEach(k => delete copy[k]);
       copy.retranca = (copy.retranca + ' 2').slice(0, 80); copy.status = 'sugestao'; S.pauta = copy; renderPautaList(); renderPautaEditor(); markPautaDirty(); };
@@ -613,6 +625,56 @@ function bindPautaHead(p) {
       catch (e) { toast(e.message, true); }
     };
   }
+}
+
+// =============================================================== CONSULTA (celular e licença de leitura)
+async function fecharEditor() {
+  if (S.pautaDirty && !(await autosavePauta()) && !confirm('A pauta ainda não pôde ser salva no sistema. Ela fica guardada como rascunho. Voltar mesmo assim?')) return;
+  clearTimeout(S.pAutoTimer); S.pautaDirty = false; S.pauta = null; await releaseLocks(); renderPautaList(); renderPautaEditor();
+}
+function pautaCard(p) {
+  const linha = (r, v) => v ? `<div><span>${r}</span> <b>${esc(v)}</b></div>` : '';
+  return `<button type="button" class="pcard" data-id="${p.id}">
+    <div class="pc-top"><b class="pc-retr">${esc(p.retranca)}</b><span class="pill st-${p.status}">${esc(label(PAUTA_STATUS, p.status))}</span></div>
+    <div class="pc-sub">${[S.pf.allDates ? fmtDate(p.data) : '', p.horario, p.local].filter(Boolean).map(esc).join(' · ') || 'Sem horário e local'}</div>
+    <div class="pc-team">${linha('Repórter', repName(p))}${linha('Cinegrafista', p.cinegrafista)}${linha('Motorista', p.motorista)}</div>
+  </button>`;
+}
+function fichaHtml(p) {
+  const mapa = (end) => end ? `<a class="fc-act" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(end)}" target="_blank" rel="noopener">📍 Mapa</a>` : '';
+  const ligar = (tel) => { const n = String(tel || '').replace(/[^\d+]/g, ''); return n.length >= 8 ? `<a class="fc-act" href="tel:${n}">📞 Ligar</a>` : ''; };
+  const bloco = (t, v) => String(v || '').trim() ? `<section class="fc-sec"><h4>${t}</h4><div class="fc-txt">${esc(v)}</div></section>` : '';
+  const prog = p.programaId ? (S.programs.find(x => x.id === p.programaId) || {}).name || '' : '';
+  const equipe = [['Repórter', repName(p)], ['Cinegrafista', p.cinegrafista], ['Motorista', p.motorista], ['Produtor', prodName(p)], ['Editor de imagens', p.edicaoEditor]];
+  const ents = (p.entrevistados || []).filter(e => e.nome);
+  const rot = (p.roteiro || []).filter(r => r.local || r.acao);
+  const local = [p.local, p.endereco].filter(Boolean).join(' — ');
+  return `<div class="ficha">
+    <div class="fc-head"><div class="fc-retr">${esc(p.retranca)}</div>
+      <div class="fc-meta"><span class="pill st-${p.status}">${esc(label(PAUTA_STATUS, p.status))}</span> ${p.data ? esc(weekday(p.data)) + ', ' + fmtDate(p.data) : ''}${p.horario ? ' · <b>' + esc(p.horario) + '</b>' : ''}${prog ? ' · ' + esc(prog) : ''}</div></div>
+    ${p.status === 'caiu' ? bloco('Motivo da queda', p.motivoQueda) : ''}
+    <div class="fc-team">${equipe.map(([r, v]) => `<div class="${v ? '' : 'vazio'}"><span>${r}</span><b>${esc(v || '—')}</b></div>`).join('')}</div>
+    ${local ? `<section class="fc-sec"><h4>Local principal</h4><div class="fc-card"><div>${esc(local)}</div><div class="fc-acts">${mapa(p.endereco || p.local)}</div></div></section>` : ''}
+    ${ents.length ? `<section class="fc-sec"><h4>Marcação</h4>${ents.map(e => `<div class="fc-card"><b>${esc(e.nome)}</b>${e.funcao ? ` <span class="hint">${esc(e.funcao)}</span>` : ''}
+      <div>${[fmtDate(e.data), e.horario, e.local].filter(Boolean).map(esc).join(' · ')}</div>
+      <div class="hint">${e.confirmado ? '✓ Confirmado' : 'A confirmar'}${e.telefone ? ' · ' + esc(e.telefone) : ''}${e.obs ? ' · ' + esc(e.obs) : ''}</div>
+      <div class="fc-acts">${ligar(e.telefone)}${mapa(e.local)}</div></div>`).join('')}</section>` : ''}
+    ${rot.length ? `<section class="fc-sec"><h4>Roteiro de gravação</h4>${rot.map(r => `<div class="fc-card"><b>${esc(r.hora || '')}</b> ${esc(r.local || '')}<div>${esc(r.acao || '')}</div></div>`).join('')}</section>` : ''}
+    ${bloco('Proposta', p.proposta)}${bloco('Informações', p.historico)}${bloco('Encaminhamento', p.encaminhamento)}${bloco('Sugestão de perguntas', p.perguntas)}
+    ${bloco('Imagens', p.imagens)}${bloco('Arte', p.arte)}${bloco('Observações', p.observacoes)}
+    ${String(p.materia || '').trim() ? `<section class="fc-sec"><h4>Matéria · ${esc(label(MATERIA_STATUS, p.materiaStatus || 'rascunho'))}</h4><div class="fc-txt">${markScript(esc(p.materia), true)}</div></section>` : ''}
+  </div>`;
+}
+async function openFicha(id) {
+  try {
+    const p = await api('GET', '/api/pautas/' + id);
+    const md = modal('Consulta da pauta', fichaHtml(p), { wide: true, footer: `<button class="btn" id="pp">Baixar PDF / Imprimir</button>${S.perms.edit ? '<button class="btn" id="op">Editar pauta</button>' : ''}<button class="btn primary" data-close>Fechar</button>` });
+    md.el.classList.add('ficha-modal'); if (document.activeElement) document.activeElement.blur();
+    $('#pp', md.el).onclick = () => printPauta(p);
+    const op = $('#op', md.el); if (op) op.onclick = async () => {
+      md.close(); S.pf.date = p.data; S.pf.allDates = false; if (S.view !== 'pautas') await go('pautas'); openPauta(p.id);
+    };
+  } catch (e) { toast(e.message, true); }
 }
 
 // =============================================================== SALVAMENTO AUTOMÁTICO DA PAUTA
@@ -627,7 +689,7 @@ function readDraft(id) { try { const d = JSON.parse(localStorage.getItem(draftKe
 function clearDraft(p) { try { localStorage.removeItem(draftKey(p && p.id)); if (p && p.id) localStorage.removeItem(draftKey(null)); } catch { } }
 function setPState(txt, dirty) { const st = $('#pstate'); if (st) { st.textContent = txt; st.classList.toggle('dirty', !!dirty); } }
 async function markPautaDirty() {
-  const p = S.pauta; if (!p) return;
+  const p = S.pauta; if (!p || !S.perms.edit) return;
   S.pEditSeq = (S.pEditSeq || 0) + 1;
   if (!S.pautaDirty) {
     S.pautaDirty = true;
@@ -1056,14 +1118,7 @@ async function flushItem(showToast) {
     if (showToast) toast('Lauda salva.');
   } catch (e) { toast(e.message, true); }
 }
-async function showPautaReadOnly(id) {
-  try {
-    const p = await api('GET', '/api/pautas/' + id);
-    const md = modal(`Pauta · ${p.retranca}`, pautaHtml(p, true), { wide: true, footer: '<button class="btn" id="pp">Imprimir / PDF</button><button class="btn" id="op">Abrir para editar</button><button class="btn primary" data-close>Fechar</button>' });
-    $('#pp', md.el).onclick = () => printPauta(p);
-    $('#op', md.el).onclick = async () => { md.close(); S.pf.date = p.data; S.pf.allDates = false; await go('pautas'); openPauta(p.id); };
-  } catch (e) { toast(e.message, true); }
-}
+const showPautaReadOnly = (id) => openFicha(id);
 
 // =============================================================== impressão / prompter
 function pautaHtml(p, screen) {
@@ -1570,6 +1625,7 @@ async function openMateria(id, silent) {
   try { S.mat = await api('GET', '/api/pautas/' + id); }
   catch (e) { S.mat = null; if (!silent) toast(e.message, true); }
   renderMatList(); renderMatEditor();
+  if (!silent && isMobile() && S.mat) $('#mat-editor').scrollIntoView({ behavior: 'smooth' });
 }
 function renderMatEditor() {
   const el = $('#mat-editor'), ref = $('#mat-ref'); if (!el) return;
@@ -1580,11 +1636,11 @@ function renderMatEditor() {
     return;
   }
   const lockedBy = p.lock && !p.lock.mine ? p.lock.name : null;
-  const ro = lockedBy ? 'disabled' : '';
+  const ro = lockedBy || !S.perms.edit ? 'disabled' : '';
   const prog = p.programaId ? (S.programs.find(x => x.id === p.programaId) || {}).name || '' : '';
   el.innerHTML = `
     <div class="pane-h"><h2>Matéria</h2><span class="savestate" id="mstate">Salva</span><div style="flex:1"></div>
-      <button class="btn primary sm" id="m-save" ${ro}>Salvar</button>
+      <button class="btn primary sm needs-edit" id="m-save" ${ro}>Salvar</button>
       <button class="btn sm" id="m-print">Imprimir / PDF</button>
       <button class="btn sm" id="m-pauta">Abrir pauta</button></div>
     ${lockedBy ? `<div class="banner">🔒 Em edição por <b>${esc(lockedBy)}</b>. Você está vendo em modo leitura.</div>` : ''}
@@ -1598,7 +1654,7 @@ function renderMatEditor() {
       <label class="lbl" for="m-st">Situação</label>
       <select id="m-st" style="width:auto" ${ro}>${opts(MATERIA_STATUS, p.materiaStatus || '')}</select>
     </div>
-    <textarea class="materia mat-text" id="m-text" spellcheck="true" ${ro} placeholder="Escreva aqui a sua matéria.&#10;&#10;[OFF]&#10;Texto narrado sobre as imagens…&#10;&#10;[SONORA] NOME / CARGO&#10;&quot;Fala do entrevistado…&quot;&#10;&#10;[PASSAGEM] NOME DO REPÓRTER&#10;Texto da passagem…">${esc(p.materia || '')}</textarea>
+    <textarea class="materia mat-text" id="m-text" spellcheck="true" ${S.perms.edit ? ro : 'readonly'} placeholder="Escreva aqui a sua matéria.&#10;&#10;[OFF]&#10;Texto narrado sobre as imagens…&#10;&#10;[SONORA] NOME / CARGO&#10;&quot;Fala do entrevistado…&quot;&#10;&#10;[PASSAGEM] NOME DO REPÓRTER&#10;Texto da passagem…">${esc(p.materia || '')}</textarea>
     <div class="mat-foot"><span class="readtime" id="m-rt">${materiaStats(p.materia) || '0 palavras'}</span><span class="grow"></span>
       <span class="hint" id="m-meta">${p.materiaAutorId ? `Última edição: <b>${esc(userName(p.materiaAutorId))}</b> em ${fmtDT(p.materiaAt)}` : 'Salvamento automático enquanto você escreve · Ctrl+S salva na hora'}</span></div>`;
 
@@ -1634,7 +1690,7 @@ function renderMatEditor() {
   $('#m-pauta').onclick = async () => { const id = p.id; S.pf.date = p.data; S.pf.allDates = false; await go('pautas'); if (S.view === 'pautas') openPauta(id); };
 }
 async function saveMateria(showToast) {
-  const p = S.mat; if (!p) return true;
+  const p = S.mat; if (!p || !S.perms.edit) return true;
   clearTimeout(S.matTimer);
   if (!S.matDirty) { if (showToast) toast('Matéria salva.'); return true; }
   const st = $('#mstate'); if (st) st.textContent = 'Salvando…';
@@ -1718,6 +1774,7 @@ function renderEdList() {
 async function openEdicao(id) {
   try { S.edOpen = await api('GET', '/api/pautas/' + id); } catch (e) { S.edOpen = null; toast(e.message, true); }
   renderEdList(); renderEdicao();
+  if (isMobile() && S.edOpen) $('#ed-main').scrollIntoView({ behavior: 'smooth' });
 }
 // roteiro de edição: blocos numerados da matéria, com tempo estimado de cada trecho e acumulado
 function roteiroEdicao(p) {
@@ -1776,12 +1833,13 @@ function renderEdicao() {
     ${blk('Encaminhamento', p.encaminhamento)}${blk('Proposta', p.proposta)}${blk('Observações da pauta', p.observacoes)}
   </div>`;
 
+  if (!S.perms.edit) { $$('#ed-ref .edbox select, #ed-ref .edbox input, #ed-ref .edbox textarea').forEach(x => { x.disabled = true; }); $('#ed-save').remove(); }
   $('#ed-print').onclick = () => printPauta(p, String(p.materia || '').trim() ? 'materia' : 'pauta');
   $('#ed-gc').onclick = async () => { try { await navigator.clipboard.writeText(gcs.join('\n')); toast('GCs copiados.'); } catch { toast('Não foi possível copiar.', true); } };
   const dirty = () => { const s = $('#edstate'); s.textContent = 'Alterações não salvas'; s.classList.add('dirty'); };
   ['#ed-st', '#ed-ed', '#ed-obs'].forEach(s => $(s).addEventListener('input', dirty));
   $('#ed-st').addEventListener('change', () => { if (isEd && !$('#ed-ed').value.trim() && $('#ed-st').value) $('#ed-ed').value = S.me.name; });
-  $('#ed-save').onclick = async () => {
+  if ($('#ed-save')) $('#ed-save').onclick = async () => {
     try {
       const saved = await api('PUT', '/api/pautas/' + p.id, { edicaoStatus: $('#ed-st').value, edicaoEditor: $('#ed-ed').value.trim(), edicaoObs: $('#ed-obs').value, updatedAt: p.updatedAt });
       Object.assign(p, { edicaoStatus: saved.edicaoStatus, edicaoEditor: saved.edicaoEditor, edicaoObs: saved.edicaoObs, updatedAt: saved.updatedAt });
@@ -2207,15 +2265,16 @@ async function viewEquipe() {
   const adm = S.perms.manageUsers;
   const invites = SUPA_MODE && adm ? await api('GET', '/api/invites') : [];
   $('#main').innerHTML = `<div class="page"><h1>Equipe</h1>
-    <div class="card"><table class="grid"><thead><tr><th>Nome</th><th>E-mail</th><th>Função</th><th>Situação</th><th>Desde</th>${adm ? '<th></th>' : ''}</tr></thead><tbody>
+    <div class="card"><table class="grid"><thead><tr><th>Nome</th><th>E-mail</th><th>Função</th><th>Licença</th><th>Situação</th><th>Desde</th>${adm ? '<th></th>' : ''}</tr></thead><tbody>
     ${S.users.map(u => `<tr data-id="${u.id}"><td><b>${esc(u.name)}</b></td><td>${esc(u.email)}</td>
       <td>${adm ? `<select data-role style="width:auto">${opts(S.roles.map(r => [r.id, r.label]), u.role)}</select>` : esc(u.roleLabel)}</td>
+      <td>${adm && u.role !== 'admin' ? `<select data-lic style="width:auto" aria-label="Licença de ${esc(u.name)}">${opts(LICENCAS, u.licenca)}</select>` : esc(label(LICENCAS, u.licenca))}</td>
       <td>${u.active ? '<span class="pill st-gravada">Ativo</span>' : '<span class="pill st-caiu">Inativo</span>'}</td><td>${fmtDT(u.createdAt)}</td>
       ${adm ? `<td><button class="btn sm" data-toggle>${u.active ? 'Desativar' : 'Ativar'}</button>${SUPA_MODE ? '' : ' <button class="btn sm" data-reset>Nova senha</button>'}</td>` : ''}</tr>`).join('')}
     </tbody></table></div>
     ${adm && invites.length ? `<div class="card"><div class="pad"><h3 style="margin-top:0">Convites pendentes</h3>
-      <table class="grid"><thead><tr><th>E-mail</th><th>Nome</th><th>Função</th><th>Enviado</th><th></th></tr></thead><tbody>
-      ${invites.map(i => `<tr data-inv="${i.id}"><td>${esc(i.email)}</td><td>${esc(i.name)}</td><td>${esc((S.roles.find(r => r.id === i.role) || {}).label || i.role)}</td><td>${fmtDT(i.createdAt)}</td><td><button class="btn sm danger" data-invdel>Cancelar</button></td></tr>`).join('')}
+      <table class="grid"><thead><tr><th>E-mail</th><th>Nome</th><th>Função</th><th>Licença</th><th>Enviado</th><th></th></tr></thead><tbody>
+      ${invites.map(i => `<tr data-inv="${i.id}"><td>${esc(i.email)}</td><td>${esc(i.name)}</td><td>${esc((S.roles.find(r => r.id === i.role) || {}).label || i.role)}</td><td>${esc(label(LICENCAS, i.licenca || 'leitura'))}</td><td>${fmtDT(i.createdAt)}</td><td><button class="btn sm danger" data-invdel>Cancelar</button></td></tr>`).join('')}
       </tbody></table></div></div>` : ''}
     ${adm ? `<div class="card"><div class="pad"><h3 style="margin-top:0">${SUPA_MODE ? 'Convidar membro da equipe' : 'Adicionar membro da equipe'}</h3>
       ${SUPA_MODE ? '<p class="hint" style="margin-top:0">A pessoa entra em “Criar conta” com este e-mail e cai direto na sua redação, com a função escolhida.</p>' : ''}
@@ -2224,9 +2283,11 @@ async function viewEquipe() {
         <div class="field"><label>E-mail</label><input type="email" name="email" required></div>
         ${SUPA_MODE ? '' : '<div class="field"><label>Senha inicial (mín. 8)</label><input type="password" name="password" required minlength="8" autocomplete="new-password"></div>'}
         <div class="field"><label>Função</label><select name="role">${opts(S.roles.map(r => [r.id, r.label]), 'reporter')}</select></div>
+        <div class="field"><label>Licença</label><select name="licenca">${opts(LICENCAS, 'leitura')}</select></div>
         <div><button class="btn primary">Adicionar</button></div>
       </form>
-      <p class="hint">Permissões: <b>Administrador</b> gerencia equipe e tudo mais · <b>Diretor de Produção e Multimídia</b> gerencia telejornais e funcionários, aprova espelhos e exclui pautas · <b>Chefe de reportagem</b> e <b>Editor</b> fecham e aprovam espelhos · <b>Produtor</b> cria e exclui pautas · <b>Repórter</b>, <b>Apresentador</b> e <b>Estagiário</b> editam pautas e laudas.</p>
+      <p class="hint"><b>Licenças</b> (o que a pessoa pode fazer): <b>Leitura</b> só consulta, baixa PDF e imprime · <b>Edição</b> também cria e edita pautas e matérias · <b>Geral</b> tem tudo, incluindo o espelho do jornal. Administradores sempre têm Geral.</p>
+      <p class="hint">Permissões da função: <b>Administrador</b> gerencia equipe e tudo mais · <b>Diretor de Produção e Multimídia</b> gerencia telejornais e funcionários, aprova espelhos e exclui pautas · <b>Chefe de reportagem</b> e <b>Editor</b> fecham e aprovam espelhos · <b>Produtor</b> cria e exclui pautas · <b>Repórter</b>, <b>Apresentador</b> e <b>Estagiário</b> editam pautas e laudas.</p>
     </div></div>` : ''}
     ${S.perms.managePrograms ? `<div class="card"><div class="pad"><h3 style="margin-top:0">Funcionários</h3>
       <p class="hint" style="margin-top:0">Cadastre quem trabalha na redação e a função de cada pessoa. Os nomes aparecem como sugestão nos campos de <b>Equipe</b> da pauta, onde também dá para escrever um nome à mão. Não cria acesso ao sistema.</p>
@@ -2305,7 +2366,9 @@ async function viewEquipe() {
   };
   $('#nu').onsubmit = async (e) => { e.preventDefault(); try { await api('POST', '/api/users', Object.fromEntries(new FormData(e.target))); toast(SUPA_MODE ? 'Convite registrado.' : 'Usuário criado.'); viewEquipe(); } catch (er) { toast(er.message, true); } };
   $$('[data-invdel]').forEach(b => b.onclick = async () => { try { await api('DELETE', '/api/invites/' + b.closest('tr').dataset.inv); viewEquipe(); } catch (er) { toast(er.message, true); } });
-  $('#main').onchange = async (e) => { if (!e.target.matches('[data-role]')) return; const id = e.target.closest('tr').dataset.id;
+  $('#main').onchange = async (e) => {
+    if (e.target.matches('[data-lic]')) { try { await api('PUT', '/api/users/' + e.target.closest('tr').dataset.id, { licenca: e.target.value }); toast('Licença alterada.'); } catch (er) { toast(er.message, true); } return viewEquipe(); }
+    if (!e.target.matches('[data-role]')) return; const id = e.target.closest('tr').dataset.id;
     try { await api('PUT', '/api/users/' + id, { role: e.target.value }); toast('Função alterada.'); } catch (er) { toast(er.message, true); viewEquipe(); } };
   $('#main').onclick = async (e) => {
     const tr = e.target.closest('tr[data-id]'); if (!tr) return; const u = S.users.find(x => x.id === tr.dataset.id);

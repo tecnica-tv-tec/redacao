@@ -78,7 +78,15 @@ window.createSupabaseAdapter = function (sb) {
     const m = {}; rows.forEach(l => { m[l.key] = { userId: l.user_id, name: l.name, mine: l.user_id === me.id }; });
     return m;
   }
-  const publicUser = (p) => ({ id: p.id, name: p.name, email: p.email, role: p.role, roleLabel: ROLE_LABEL[p.role], active: p.active, createdAt: p.createdAt });
+  // licenças: leitura (consulta/PDF) · edicao (pautas e matérias) · geral (tudo + espelho)
+  const LICENCAS = ['leitura', 'edicao', 'geral'];
+  const licencaDe = (p) => p.role === 'admin' ? 'geral' : (LICENCAS.includes(p.licenca) ? p.licenca : 'leitura');
+  const permsDe = (u) => {
+    const l = licencaDe(u);
+    const perms = Object.fromEntries(Object.keys(CAN).map(k => [k, l !== 'leitura' && !(l === 'edicao' && ['editRundown', 'approveRundown', 'managePrograms'].includes(k)) && CAN[k].includes(u.role)]));
+    return Object.assign(perms, { licenca: l, edit: l !== 'leitura', rundown: l === 'geral' });
+  };
+  const publicUser = (p) => ({ id: p.id, name: p.name, email: p.email, role: p.role, roleLabel: ROLE_LABEL[p.role], licenca: licencaDe(p), active: p.active, createdAt: p.createdAt });
 
   // ------------------------------------------------------------ rotas
   const R = [];
@@ -130,7 +138,7 @@ window.createSupabaseAdapter = function (sb) {
     const u = await requireMe();
     const org = fromDb(check(await sb.from('orgs').select('*').eq('id', u.orgId).single()));
     return { user: publicUser(u), org, roles: ROLES.map(r => ({ id: r, label: ROLE_LABEL[r] })),
-      perms: Object.fromEntries(Object.keys(CAN).map(k => [k, CAN[k].includes(u.role)])) };
+      perms: permsDe(u) };
   });
   on('PUT', '/api/org', async (b) => {
     if (me.role !== 'admin') fail('Só o administrador altera os dados da emissora.');
@@ -160,7 +168,7 @@ window.createSupabaseAdapter = function (sb) {
   on('POST', '/api/users', async (b) => {   // convite
     if (!b.email || !ROLES.includes(b.role)) fail('Informe e-mail e função.');
     exigirDominio(b.email);
-    check(await sb.from('invites').insert({ org_id: me.orgId, email: String(b.email).toLowerCase().trim(), name: b.name || '', role: b.role, created_by: me.id }));
+    check(await sb.from('invites').insert({ org_id: me.orgId, email: String(b.email).toLowerCase().trim(), name: b.name || '', role: b.role, licenca: LICENCAS.includes(b.licenca) ? b.licenca : 'leitura', created_by: me.id }));
     await log('usuario', `Convidou ${b.email}`);
     return { ok: true };
   });
@@ -168,6 +176,7 @@ window.createSupabaseAdapter = function (sb) {
     const patch = {};
     if (b.name) patch.name = b.name;
     if (b.role && ROLES.includes(b.role)) patch.role = b.role;
+    if (b.licenca && LICENCAS.includes(b.licenca)) patch.licenca = b.licenca;
     if (typeof b.active === 'boolean') patch.active = b.active;
     return publicUser(fromDb(check(await sb.from('profiles').update(patch).eq('id', p.id).select().single())));
   });

@@ -65,6 +65,23 @@ Login de demonstração: `admin@demo.local` / `demo1234`. Também existem `chefe
 - Na pauta, o bloco **Equipe** tem Produtor, Repórter, Repórter cinematográfico, Motorista e Editor de imagens, com sugestões do cadastro e digitação livre.
 - Cargo de acesso **Diretor de Produção e Multimídia:** gerencia telejornais e funcionários, aprova espelhos e exclui pautas. A gestão de contas continua só com o Administrador.
 
+## Licenças por usuário
+
+O administrador define em **Equipe**, na coluna **Licença** (e também no convite):
+
+| Licença | O que pode fazer |
+|---|---|
+| **Leitura** | Consultar pautas e matérias, baixar PDF e imprimir |
+| **Edição** | Tudo da Leitura, mais criar e editar pautas e matérias |
+| **Geral** | Tudo da Edição, mais o espelho do jornal, o modo No ar e os telejornais |
+
+Administradores sempre têm Geral. Contas novas sem convite começam em Leitura. As regras valem também no banco.
+
+## Celular
+
+Em telas pequenas, as pautas aparecem em cartões com repórter, cinegrafista e motorista. Tocar no cartão abre a ficha
+de consulta, com a equipe, a marcação e botões **Ligar** e **Mapa**.
+
 ## Acesso restrito ao domínio
 
 - Só cria conta quem usa e-mail **@tvtecjundiai.com.br**. A regra está no banco (`public.acesso_config` e o gancho

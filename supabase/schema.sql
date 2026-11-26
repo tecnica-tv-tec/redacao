@@ -607,3 +607,67 @@ grant execute on function public.reorder_items(uuid, uuid[]) to authenticated;
 grant execute on function public.on_air_item(uuid, boolean)  to authenticated;
 grant execute on function public.set_equipe_tecnica(text[], text[]) to authenticated;
 grant execute on function public.on_air_rundown(uuid, text)  to authenticated;
+
+-- ---------------------------------------------------------------- LICENÇAS
+-- leitura = só consulta · edicao = cria/edita pautas e matérias · geral = tudo + espelho
+do $do$ begin
+  if not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'profiles' and column_name = 'licenca') then
+    alter table public.profiles add column licenca text not null default 'geral';   -- quem já existia mantém o acesso
+    alter table public.profiles alter column licenca set default 'leitura';         -- novas contas começam em leitura
+  end if;
+end $do$;
+alter table public.profiles drop constraint if exists profiles_licenca_check;
+alter table public.profiles add constraint profiles_licenca_check check (licenca in ('leitura','edicao','geral'));
+alter table public.invites add column if not exists licenca text not null default 'leitura' check (licenca in ('leitura','edicao','geral'));
+
+create or replace function public.my_licenca() returns text
+language sql stable security definer set search_path = public as $$
+  select case when role = 'admin' then 'geral' else licenca end from public.profiles where id = auth.uid() and active
+$$;
+create or replace function public.can_edit() returns boolean
+language sql stable security definer set search_path = public as $$
+  select coalesce(public.my_licenca() in ('edicao','geral'), false)
+$$;
+create or replace function public.can_rundown() returns boolean
+language sql stable security definer set search_path = public as $$
+  select coalesce(public.my_licenca() = 'geral', false)
+$$;
+
+-- conta nova: administrador entra com Geral; convidado recebe a licença escolhida no convite
+create or replace function public.tg_profiles_licenca() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare v text;
+begin
+  select licenca into v from public.invites where lower(email) = lower(new.email);
+  new.licenca := case when new.role = 'admin' then 'geral' else coalesce(v, 'leitura') end;
+  return new;
+end $$;
+drop trigger if exists profiles_licenca_bi on public.profiles;
+create trigger profiles_licenca_bi before insert on public.profiles
+  for each row execute function public.tg_profiles_licenca();
+
+-- regras restritivas: somam-se às demais e bloqueiam a gravação sem a licença necessária
+do $do$ declare r record; begin
+  for r in select * from (values ('pautas','can_edit','insert'), ('pautas','can_edit','update'),
+    ('rundowns','can_rundown','insert'), ('rundowns','can_rundown','update'),
+    ('items','can_rundown','insert'), ('items','can_rundown','update'),
+    ('programs','can_rundown','insert'), ('programs','can_rundown','update'), ('programs','can_rundown','delete')) v(tab, fn, cmd)
+  loop
+    execute format('drop policy if exists %I on public.%I', 'lic_' || r.cmd, r.tab);
+    execute format('create policy %I on public.%I as restrictive for %s %s (public.%I())',
+      'lic_' || r.cmd, r.tab, r.cmd, case when r.cmd = 'insert' then 'with check' else 'using' end, r.fn);
+  end loop;
+end $do$;
+
+-- funções que gravam por fora das regras acima também conferem a licença
+do $do$ declare r record; d text; begin
+  for r in select * from (values
+    ('public.on_air_item(uuid,boolean)', 'can_rundown'), ('public.on_air_rundown(uuid,text)', 'can_rundown'),
+    ('public.set_funcionarios(jsonb)', 'can_rundown'), ('public.set_equipe_tecnica(text[],text[])', 'can_rundown')) v(sig, fn)
+  loop
+    d := pg_get_functiondef(r.sig::regprocedure);
+    if position(r.fn in d) = 0 then
+      execute regexp_replace(d, '(\n\s*)begin(\s*\n)', E'\\1begin\\2  if not public.' || r.fn || E'() then raise exception ''Sua licença não permite esta ação.''; end if;\n');
+    end if;
+  end loop;
+end $do$;
