@@ -268,7 +268,6 @@ table.grid { width: 100%; border-collapse: collapse; font-size: 12px; }
 .dots i.ok { background: var(--green); border-color: var(--green); }
 
 /* ---------- calendário ---------- */
-.minical { margin-bottom: 12px; }
 .cal-h { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; font-size: 12px; }
 .cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
 .cal-dow { font-size: 10px; text-transform: uppercase; color: var(--muted); text-align: center; padding: 2px 0; letter-spacing: .05em; }

@@ -128,7 +128,7 @@ const userName = (id) => { const u = S.users.find(u => u.id === id); return u ? 
 const repName = (p) => userName(p.reporterId) || p.reporterNome || '';
 const prodName = (p) => userName(p.produtorId) || p.produtorNome || '';
 const CARGO_DIRETOR = 'Diretor de Produção e Multimídia';
-const FUNCOES = [CARGO_DIRETOR, 'Chefe de reportagem', 'Produtor', 'Repórter', 'Repórter cinematográfico', 'Motorista', 'Editor de texto', 'Editor de imagens', 'Apresentador'];
+const FUNCOES = [CARGO_DIRETOR, 'Chefe de reportagem', 'Produtor', 'Repórter', 'Repórter cinematográfico', 'Motorista', 'Editor de texto', 'Editor de imagens', 'Apresentador', 'Estagiário'];
 // funcionários cadastrados (inclui os nomes do cadastro antigo de cinegrafistas e motoristas)
 function funcionarios() {
   const o = S.org || {}, lista = (o.funcionarios || []).map(f => ({ nome: f.nome, funcao: f.funcao }));
@@ -344,7 +344,6 @@ async function viewPautas() {
   <div class="workspace ws-pautas">
     <aside class="pane"><div class="pane-h"><h2>Filtros</h2></div>
       <div class="pane-b pad filters">
-        <div id="minical" class="minical"></div>
         <div class="field"><label>Data</label>
           <div class="datenav"><button class="btn sm" data-d="-1" aria-label="Dia anterior">‹</button><input type="date" id="pf-date" value="${S.pf.date}"><button class="btn sm" data-d="1" aria-label="Próximo dia">›</button></div>
           <label class="check" style="margin-top:6px"><input type="checkbox" id="pf-all" ${S.pf.allDates ? 'checked' : ''}> Todas as datas</label>
@@ -364,7 +363,7 @@ async function viewPautas() {
       <div class="pane-b" id="pauta-list"></div></section>
     <section class="pane editor" id="pauta-editor"></section>
   </div>`;
-  const reload = async () => { S.calYm = S.pf.date.slice(0, 7); await loadPautas(); renderPautaList(); renderMiniCal(); };
+  const reload = async () => { await loadPautas(); renderPautaList(); };
   const set = (k, v) => { S.pf[k] = v; reload(); };
   $('#pf-date').onchange = e => { S.pf.allDates = false; $('#pf-all').checked = false; set('date', e.target.value || today()); };
   $$('[data-d]').forEach(b => b.onclick = () => { S.pf.allDates = false; $('#pf-all').checked = false; S.pf.date = addDays(S.pf.date, +b.dataset.d); $('#pf-date').value = S.pf.date; reload(); });
@@ -1482,18 +1481,29 @@ function prompter() {
   const parts = C.rows.filter(r => !r.isBreak && !r.dead && (r.it.cabeca || READ_TYPES.includes(r.it.tipo) && r.it.texto));
   const bg = document.createElement('div');
   bg.style.cssText = 'position:fixed;inset:0;background:#000;color:#fff;z-index:200;overflow:auto;padding:40px 8vw;font:600 clamp(26px,4.2vw,58px)/1.45 Arial,sans-serif;text-transform:uppercase';
-  bg.innerHTML = `<div style="position:fixed;top:10px;right:16px;font:13px var(--sans);text-transform:none;color:#aaa">Espaço: rolar/pausar · ↑↓ velocidade · Esc: sair</div>` +
+  bg.innerHTML = `<div style="position:fixed;top:10px;right:16px;font:13px var(--sans);text-transform:none;color:#aaa">Espaço: rolar/pausar · ↑↓ velocidade · Esc: sair<br><b id="pr-vel" style="display:block;text-align:right;font-size:15px;color:#e0a526;margin-top:4px"></b></div>` +
     (parts.length ? parts.map(r => `<div style="color:#e0a526;font-size:.45em;margin-top:1.4em">${r.pagina} · ${esc(r.it.retranca)}</div>
     <div style="white-space:pre-wrap">${esc(r.it.cabeca).replace(/\[([^\]]*)\]/g, '<span style="color:#6cf;font-size:.6em">[$1]</span>')}${READ_TYPES.includes(r.it.tipo) && r.it.texto ? '\n' + esc(r.it.texto).replace(/\[([^\]]*)\]/g, '<span style="color:#6cf;font-size:.6em">[$1]</span>') : ''}</div>`).join('') : '<p>Sem textos de apresentação.</p>') + '<div style="height:80vh"></div>';
   document.body.appendChild(bg);
-  let speed = 1.5, run = false, raf;
-  const loop = () => { if (run) { bg.scrollTop += speed; raf = requestAnimationFrame(loop); } };
-  const key = (e) => {
-    if (e.key === 'Escape') { run = false; cancelAnimationFrame(raf); bg.remove(); document.removeEventListener('keydown', key); }
-    if (e.key === ' ') { e.preventDefault(); run = !run; if (run) loop(); }
-    if (e.key === 'ArrowUp') { e.preventDefault(); speed = Math.min(8, speed + .5); }
-    if (e.key === 'ArrowDown') { e.preventDefault(); speed = Math.max(.5, speed - .5); }
+  // velocidade em pixels por segundo (igual em qualquer monitor); começa devagar
+  const MIN = 10, MAX = 300, PASSO = 5;
+  let speed = 25, run = false, raf, last = 0, pos = 0;
+  const showSpeed = () => { $('#pr-vel', bg).textContent = `Velocidade ${(speed - MIN) / PASSO + 1} · ${run ? 'rolando' : 'pausado'}`; };
+  const loop = (now) => {
+    if (!run) return;
+    if (Math.abs(bg.scrollTop - pos) > 3) pos = bg.scrollTop;   // respeita rolagem manual
+    if (last) pos += speed * Math.min(0.1, (now - last) / 1000);
+    last = now; bg.scrollTop = pos; raf = requestAnimationFrame(loop);
   };
+  const key = (e) => {
+    if (e.key === 'Escape') { run = false; cancelAnimationFrame(raf); bg.remove(); document.removeEventListener('keydown', key); return; }
+    if (e.key === ' ') { e.preventDefault(); run = !run; cancelAnimationFrame(raf); if (run) { last = 0; pos = bg.scrollTop; raf = requestAnimationFrame(loop); } }
+    if (e.key === 'ArrowUp') { e.preventDefault(); speed = Math.min(MAX, speed + PASSO); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); speed = Math.max(MIN, speed - PASSO); }
+    showSpeed();
+  };
+  showSpeed();
+  if (document.activeElement) document.activeElement.blur();   // Espaço não deve reacionar o botão Prompter
   document.addEventListener('keydown', key);
 }
 
@@ -2077,23 +2087,6 @@ function monthGrid(ym, cell, cls = '') {
   return `<div class="cal ${cls}">${['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map(d => `<div class="cal-dow">${cls.includes('mini') ? d[0] : d}</div>`).join('')}
     ${days.slice(0, weeks * 7).map(iso => cell(iso, iso.slice(0, 7) === ym)).join('')}</div>`;
 }
-async function renderMiniCal() {
-  const el = $('#minical'); if (!el) return;
-  const ym = S.calYm || S.pf.date.slice(0, 7); S.calYm = ym;
-  const [from, to] = monthRange(ym);
-  let counts = {};
-  try { (await api('GET', `/api/pautas?from=${from}&to=${to}`)).forEach(p => { counts[p.data] = (counts[p.data] || 0) + 1; }); } catch { }
-  el.innerHTML = `<div class="cal-h"><button class="btn sm" data-cm="-1" aria-label="Mês anterior">‹</button><b>${MESES[+ym.slice(5) - 1]} ${ym.slice(0, 4)}</b><button class="btn sm" data-cm="1" aria-label="Próximo mês">›</button></div>` +
-    monthGrid(ym, (iso, inM) => `<button class="cal-d ${inM ? '' : 'out'} ${iso === today() ? 'today' : ''} ${!S.pf.allDates && iso === S.pf.date ? 'on' : ''}" data-day="${iso}" title="${counts[iso] || 0} pauta(s)">${+iso.slice(8)}${counts[iso] ? `<i>${counts[iso]}</i>` : ''}</button>`, 'mini');
-  el.onclick = async (e) => {
-    const cm = e.target.closest('[data-cm]'); if (cm) { S.calYm = shiftMonth(ym, +cm.dataset.cm); return renderMiniCal(); }
-    const d = e.target.closest('[data-day]'); if (!d) return;
-    S.pf.date = d.dataset.day; S.pf.allDates = false; const all = $('#pf-all'); if (all) all.checked = false;
-    const di = $('#pf-date'); if (di) di.value = S.pf.date;
-    S.calYm = S.pf.date.slice(0, 7);
-    await loadPautas(); renderPautaList(); renderMiniCal();
-  };
-}
 async function viewCalendario() {
   S.bigYm = S.bigYm || today().slice(0, 7);
   const ym = S.bigYm; const [from, to] = monthRange(ym);
@@ -2130,11 +2123,11 @@ async function viewCalendario() {
     const cm = e.target.closest('[data-cm]');
     if (cm) { S.bigYm = cm.dataset.cm === '0' ? today().slice(0, 7) : shiftMonth(ym, +cm.dataset.cm); return viewCalendario(); }
     const nw = e.target.closest('[data-new]');
-    if (nw) { S.pf.date = nw.dataset.new; S.pf.allDates = false; S.calYm = S.pf.date.slice(0, 7); await go('pautas'); return openPauta(null); }
+    if (nw) { S.pf.date = nw.dataset.new; S.pf.allDates = false; await go('pautas'); return openPauta(null); }
     const ev = e.target.closest('[data-pid]');
-    if (ev) { S.pf.date = ev.dataset.pday; S.pf.allDates = false; S.calYm = S.pf.date.slice(0, 7); await go('pautas'); return openPauta(ev.dataset.pid); }
+    if (ev) { S.pf.date = ev.dataset.pday; S.pf.allDates = false; await go('pautas'); return openPauta(ev.dataset.pid); }
     const od = e.target.closest('[data-open-day]');
-    if (od) { S.pf.date = od.dataset.openDay; S.pf.allDates = false; S.calYm = S.pf.date.slice(0, 7); return go('pautas'); }
+    if (od) { S.pf.date = od.dataset.openDay; S.pf.allDates = false; return go('pautas'); }
   };
 }
 
@@ -2233,7 +2226,7 @@ async function viewEquipe() {
         <div class="field"><label>Função</label><select name="role">${opts(S.roles.map(r => [r.id, r.label]), 'reporter')}</select></div>
         <div><button class="btn primary">Adicionar</button></div>
       </form>
-      <p class="hint">Permissões: <b>Administrador</b> gerencia equipe e tudo mais · <b>Diretor de Produção e Multimídia</b> gerencia telejornais e funcionários, aprova espelhos e exclui pautas · <b>Chefe de reportagem</b> e <b>Editor</b> fecham e aprovam espelhos · <b>Produtor</b> cria e exclui pautas · <b>Repórter</b> e <b>Apresentador</b> editam pautas e laudas.</p>
+      <p class="hint">Permissões: <b>Administrador</b> gerencia equipe e tudo mais · <b>Diretor de Produção e Multimídia</b> gerencia telejornais e funcionários, aprova espelhos e exclui pautas · <b>Chefe de reportagem</b> e <b>Editor</b> fecham e aprovam espelhos · <b>Produtor</b> cria e exclui pautas · <b>Repórter</b>, <b>Apresentador</b> e <b>Estagiário</b> editam pautas e laudas.</p>
     </div></div>` : ''}
     ${S.perms.managePrograms ? `<div class="card"><div class="pad"><h3 style="margin-top:0">Funcionários</h3>
       <p class="hint" style="margin-top:0">Cadastre quem trabalha na redação e a função de cada pessoa. Os nomes aparecem como sugestão nos campos de <b>Equipe</b> da pauta, onde também dá para escrever um nome à mão. Não cria acesso ao sistema.</p>

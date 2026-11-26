@@ -4,8 +4,8 @@
 'use strict';
 
 window.createSupabaseAdapter = function (sb) {
-  const ROLES = ['admin', 'chefe', 'editor', 'produtor', 'reporter', 'apresentador', 'editor_imagem', 'diretor'];
-  const ROLE_LABEL = { admin: 'Administrador', chefe: 'Chefe de reportagem', editor: 'Editor', produtor: 'Produtor', reporter: 'Repórter', apresentador: 'Apresentador', editor_imagem: 'Editor de imagens', diretor: 'Diretor de Produção e Multimídia' };
+  const ROLES = ['admin', 'chefe', 'editor', 'produtor', 'reporter', 'apresentador', 'editor_imagem', 'diretor', 'estagiario'];
+  const ROLE_LABEL = { admin: 'Administrador', chefe: 'Chefe de reportagem', editor: 'Editor', produtor: 'Produtor', reporter: 'Repórter', apresentador: 'Apresentador', editor_imagem: 'Editor de imagens', diretor: 'Diretor de Produção e Multimídia', estagiario: 'Estagiário' };
   const CAN = {
     manageUsers: ['admin'], managePrograms: ['admin', 'chefe', 'diretor'],
     editRundown: ROLES, approveRundown: ['admin', 'chefe', 'editor', 'diretor'], deletePauta: ['admin', 'chefe', 'produtor', 'diretor'],

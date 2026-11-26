@@ -31,7 +31,7 @@ create table if not exists public.profiles (
   name        text not null,
   email       text not null,
   role        text not null default 'reporter'
-              check (role in ('admin','chefe','editor','produtor','reporter','apresentador','editor_imagem','diretor')),
+              check (role in ('admin','chefe','editor','produtor','reporter','apresentador','editor_imagem','diretor','estagiario')),
   active      boolean not null default true,
   created_at  timestamptz not null default now()
 );
@@ -45,7 +45,7 @@ create table if not exists public.invites (
   email       text not null unique,
   name        text,
   role        text not null default 'reporter'
-              check (role in ('admin','chefe','editor','produtor','reporter','apresentador','editor_imagem','diretor')),
+              check (role in ('admin','chefe','editor','produtor','reporter','apresentador','editor_imagem','diretor','estagiario')),
   created_by  uuid references public.profiles(id) on delete set null,
   created_at  timestamptz not null default now()
 );
@@ -119,10 +119,10 @@ alter table public.pautas add column if not exists edicao_obs       text not nul
 -- função "Editor de imagens"
 alter table public.profiles drop constraint if exists profiles_role_check;
 alter table public.profiles add constraint profiles_role_check
-  check (role in ('admin','chefe','editor','produtor','reporter','apresentador','editor_imagem','diretor'));
+  check (role in ('admin','chefe','editor','produtor','reporter','apresentador','editor_imagem','diretor','estagiario'));
 alter table public.invites drop constraint if exists invites_role_check;
 alter table public.invites add constraint invites_role_check
-  check (role in ('admin','chefe','editor','produtor','reporter','apresentador','editor_imagem','diretor'));
+  check (role in ('admin','chefe','editor','produtor','reporter','apresentador','editor_imagem','diretor','estagiario'));
 -- QUEDA: justificativa obrigatória quando a pauta cai
 alter table public.pautas add column if not exists motivo_queda     text not null default '';
 -- HISTÓRICO DE STATUS (relatório de tempo de produção): [{status, at, by}]
