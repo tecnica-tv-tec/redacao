@@ -254,7 +254,6 @@ function renderShell() {
       <nav class="nav">${nav.filter(([k]) => k !== 'espelho' || S.perms.rundown).map(([k, l]) => `<button data-go="${k}">${l}</button>`).join('')}</nav>
       <div class="spacer"></div>
       <form id="gsearch-f" class="gsearch" role="search"><input type="search" id="gsearch" placeholder="Buscar pautas e matérias…" aria-label="Buscar pautas e matérias"></form>
-      <span class="org">${esc(S.org.name)}</span>
       <span class="clock" id="clock">--:--:--</span>
       <div class="userchip" id="userchip"><span class="avatar">${esc(initials(S.me.name))}</span><span>${esc(S.me.name.split(' ')[0])}</span></div>
     </header>
@@ -347,31 +346,45 @@ async function loadPautas() {
 async function viewPautas() {
   $('#main').innerHTML = `
   <div class="workspace ws-pautas">
-    <aside class="pane"><div class="pane-h"><h2>Filtros</h2></div>
-      <div class="pane-b pad filters">
-        <div class="field"><label>Data</label>
-          <div class="datenav"><button class="btn sm" data-d="-1" aria-label="Dia anterior">‹</button><input type="date" id="pf-date" value="${S.pf.date}"><button class="btn sm" data-d="1" aria-label="Próximo dia">›</button></div>
-          <label class="check" style="margin-top:6px"><input type="checkbox" id="pf-all" ${S.pf.allDates ? 'checked' : ''}> Todas as datas</label>
-          <button class="btn sm" id="pf-today" style="margin-top:6px">Hoje</button>
+    <section class="pane list-pane">
+      <header class="pl-head">
+        <div class="pl-title"><h1>Pautas</h1><p id="pf-label"></p></div>
+        <div class="pl-actions">
+          <button class="btn" id="pf-capa" title="Cronograma das pautas do dia seguinte">Capa da pauta</button>
+          <button class="btn" id="pf-print">Imprimir lista</button>
+          <button class="btn primary" id="pf-new">+ Nova pauta</button>
         </div>
-        <div class="field"><label>Buscar</label><input type="search" id="pf-q" value="${esc(S.pf.q)}" placeholder="Retranca, matéria, entrevistado…"></div>
-        <div class="field"><label>Status</label><select id="pf-status"><option value="">Todos</option>${opts(PAUTA_STATUS, S.pf.status)}</select></div>
-        <div class="field"><label>Editoria</label><select id="pf-editoria"><option value="">Todas</option>${opts(EDITORIAS, S.pf.editoria)}</select></div>
-        <div class="field"><label>Telejornal</label><select id="pf-prog"><option value="">Todos</option>${opts(S.programs.map(p => [p.id, p.name]), S.pf.programaId)}</select></div>
-        <label class="check"><input type="checkbox" id="pf-mine" ${S.pf.mine ? 'checked' : ''}> Somente minhas pautas</label>
-        <hr style="border-color:var(--line);margin:14px 0">
-        <div class="hint" id="pf-count"></div>
+      </header>
+      <div class="pl-bar">
+        <div class="pl-date">
+          <button class="btn" data-d="-1" aria-label="Dia anterior">‹</button>
+          <input type="date" id="pf-date" aria-label="Data das pautas" value="${S.pf.date}">
+          <button class="btn" data-d="1" aria-label="Próximo dia">›</button>
+        </div>
+        <button class="btn" id="pf-today">Hoje</button>
+        <label class="pl-chip"><input type="checkbox" id="pf-all" ${S.pf.allDates ? 'checked' : ''}> Todas as datas</label>
+        <input type="search" id="pf-q" aria-label="Buscar pautas" value="${esc(S.pf.q)}" placeholder="Buscar retranca, matéria ou entrevistado">
+        <button class="btn" id="pf-toggle" aria-controls="pf-panel" aria-expanded="${!!S.pfOpen}">Filtros <b class="pl-badge" id="pf-nf"></b></button>
       </div>
-    </aside>
-    <section class="pane"><div class="pane-h"><img class="ph-logo" src="${esc(orgLogo())}" alt="${esc((S.org && S.org.name) || '')}"><h2>Pautas</h2><span class="hint" id="pf-label"></span><div style="flex:1"></div>
-        <button class="btn sm mob-only" id="pf-toggle" aria-expanded="false">Filtros</button>
-        <button class="btn sm" id="pf-capa" title="Cronograma das pautas do dia seguinte">🗒 Capa da pauta</button>
-        <button class="btn sm" id="pf-print">Imprimir lista</button><button class="btn primary sm" id="pf-new">+ Nova pauta</button></div>
-      <div class="pane-b" id="pauta-list"></div></section>
+      <div class="pl-filters" id="pf-panel" ${S.pfOpen ? '' : 'hidden'}>
+        <label>Status<select id="pf-status"><option value="">Todos</option>${opts(PAUTA_STATUS, S.pf.status)}</select></label>
+        <label>Editoria<select id="pf-editoria"><option value="">Todas</option>${opts(EDITORIAS, S.pf.editoria)}</select></label>
+        <label>Telejornal<select id="pf-prog"><option value="">Todos</option>${opts(S.programs.map(p => [p.id, p.name]), S.pf.programaId)}</select></label>
+        <label class="pl-chip"><input type="checkbox" id="pf-mine" ${S.pf.mine ? 'checked' : ''}> Somente minhas pautas</label>
+        <button class="btn" id="pf-clear">Limpar filtros</button>
+      </div>
+      <div class="pl-count" id="pf-count" role="status"></div>
+      <div class="pane-b" id="pauta-list"></div>
+    </section>
     <section class="pane editor" id="pauta-editor"></section>
   </div>`;
   const reload = async () => { await loadPautas(); renderPautaList(); };
-  const set = (k, v) => { S.pf[k] = v; reload(); };
+  // número de filtros ligados aparece no botão, mesmo com o painel fechado
+  const contar = () => { const n = [S.pf.status, S.pf.editoria, S.pf.programaId, S.pf.mine].filter(Boolean).length; $('#pf-nf').textContent = n || ''; $('#pf-clear').hidden = !n; };
+  const set = (k, v) => { S.pf[k] = v; contar(); reload(); };
+  $('#pf-clear').onclick = () => { Object.assign(S.pf, { status: '', editoria: '', programaId: '', mine: false });
+    $('#pf-status').value = ''; $('#pf-editoria').value = ''; $('#pf-prog').value = ''; $('#pf-mine').checked = false; contar(); reload(); };
+  contar();
   $('#pf-date').onchange = e => { S.pf.allDates = false; $('#pf-all').checked = false; set('date', e.target.value || today()); };
   $$('[data-d]').forEach(b => b.onclick = () => { S.pf.allDates = false; $('#pf-all').checked = false; S.pf.date = addDays(S.pf.date, +b.dataset.d); $('#pf-date').value = S.pf.date; reload(); });
   $('#pf-today').onclick = () => { S.pf.allDates = false; $('#pf-all').checked = false; S.pf.date = today(); $('#pf-date').value = S.pf.date; reload(); };
@@ -382,7 +395,7 @@ async function viewPautas() {
   $('#pf-prog').onchange = e => set('programaId', e.target.value);
   $('#pf-mine').onchange = e => set('mine', e.target.checked);
   $('#pf-new').onclick = () => openPauta(null);
-  $('#pf-toggle').onclick = (e) => { const on = $('.ws-pautas').classList.toggle('show-filters'); e.target.setAttribute('aria-expanded', on); };
+  $('#pf-toggle').onclick = (e) => { S.pfOpen = !S.pfOpen; $('#pf-panel').hidden = !S.pfOpen; e.currentTarget.setAttribute('aria-expanded', S.pfOpen); };
   $('#pf-print').onclick = printPautaList;
   $('#pf-capa').onclick = openCapa;
   $('#pauta-list').onclick = e => {
@@ -396,21 +409,29 @@ async function viewPautas() {
 }
 function renderPautaList() {
   const el = $('#pauta-list'); if (!el) return;
-  $('#pf-label').textContent = S.pf.allDates ? 'todas as datas' : `${weekday(S.pf.date)}, ${fmtDate(S.pf.date)}`;
-  $('#pf-count').textContent = `${S.pautas.length} pauta(s) encontrada(s)`;
-  if (!S.pautas.length) { el.innerHTML = `<div class="empty">Nenhuma pauta para este filtro.${S.perms.edit ? '<br><br><button class="btn primary" onclick="openPauta(null)">Criar pauta</button>' : ''}</div>`; return; }
+  const dia = new Date(S.pf.date + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  $('#pf-label').textContent = S.pf.allDates ? 'Todas as datas' : dia.replace(/^./, c => c.toUpperCase());
+  $('#pf-count').textContent = S.pautas.length === 1 ? '1 pauta' : `${S.pautas.length} pautas`;
+  if (!S.pautas.length) { el.innerHTML = `<div class="pl-empty"><b>Nenhuma pauta por aqui</b><span>Mude a data ou os filtros${S.perms.edit ? ', ou crie a primeira pauta' : ''}.</span>${S.perms.edit ? '<button class="btn primary" onclick="openPauta(null)">+ Criar pauta</button>' : ''}</div>`; return; }
   const selId = S.pauta && S.pauta.id;
-  el.innerHTML = `<table class="grid"><thead><tr><th></th><th>Retranca</th><th title="Retranca · Proposta · Marcação · Informações">R P M I</th><th>Status</th><th>Editoria</th><th>Repórter</th><th>Hora</th>${S.pf.allDates ? '<th>Data</th>' : ''}<th>Formato</th><th>Matéria</th></tr></thead><tbody>
-  ${S.pautas.map(p => `<tr class="row ${p.id === selId ? 'sel' : ''}" data-id="${p.id}">
-    <td>${p.prioridade === 'urgente' ? '<span class="pri-urgente">!!</span>' : p.prioridade === 'alta' ? '<span class="pri-alta">!</span>' : ''}${p.lock && !p.lock.mine ? ` <span class="lockico" title="Em edição por ${esc(p.lock.name)}">🔒</span>` : ''}</td>
-    <td class="retr">${esc(p.retranca)}</td>
-    <td class="dots">${pautaChecks(p).map(([l, ok]) => `<i class="${ok ? 'ok' : ''}" title="${l}: ${ok ? 'preenchido' : 'pendente'}"></i>`).join('')}</td>
-    <td><span class="pill st-${p.status}" ${p.status === 'caiu' && p.motivoQueda ? `title="Motivo da queda: ${esc(p.motivoQueda)}"` : ''}>${esc(label(PAUTA_STATUS, p.status))}${p.status === 'caiu' && p.motivoQueda ? ' ⓘ' : ''}</span></td>
-    <td>${esc(p.editoria)}</td><td>${esc(repName(p))}</td><td class="mono">${esc(p.horario)}</td>
-    ${S.pf.allDates ? `<td class="mono">${fmtDate(p.data)}</td>` : ''}<td><span class="tipo">${esc(p.formato || '')}</span></td>
-    <td>${materiaPill(p)}</td></tr>`).join('')}
-  </tbody></table>
+  el.innerHTML = `<div class="plist">${S.pautas.map(p => pautaRow(p, selId)).join('')}</div>
   <div class="pcards">${S.pautas.map(pautaCard).join('')}</div>`;
+}
+// linha da lista no computador: horário · retranca e dados · andamento e situação
+function pautaRow(p, selId) {
+  const checks = pautaChecks(p), feitos = checks.filter(c => c[1]).length;
+  const meta = [S.pf.allDates ? fmtDate(p.data) : '', repName(p) || 'Sem repórter', p.editoria, p.formato, p.local].filter(Boolean);
+  const marca = p.prioridade === 'urgente' ? '<span class="pri-urgente">Urgente</span>' : p.prioridade === 'alta' ? '<span class="pri-alta">Prioridade alta</span>' : '';
+  return `<button type="button" class="prow ${p.id === selId ? 'sel' : ''} ${p.status === 'caiu' ? 'caiu' : ''}" data-id="${p.id}">
+    <span class="pr-hora ${p.horario ? '' : 'vazia'}">${esc(p.horario || '--:--')}</span>
+    <span class="pr-main"><span class="pr-top"><b class="pr-retr">${esc(p.retranca)}</b>${marca}${p.lock && !p.lock.mine ? `<span class="lockico" title="Em edição por ${esc(p.lock.name)}">🔒 ${esc(p.lock.name)}</span>` : ''}</span>
+      <span class="pr-meta">${meta.map(esc).join('<i>·</i>')}</span></span>
+    <span class="pr-side">
+      <span class="pr-prog" title="${checks.map(([l, ok]) => `${l}: ${ok ? 'preenchido' : 'pendente'}`).join('\n')}"><span class="dots">${checks.map(([, ok]) => `<i class="${ok ? 'ok' : ''}"></i>`).join('')}</span> ${feitos}/4</span>
+      ${String(p.materia || '').trim() ? materiaPill(p) : ''}
+      <span class="pill st-${p.status}" ${p.status === 'caiu' && p.motivoQueda ? `title="Motivo da queda: ${esc(p.motivoQueda)}"` : ''}>${esc(label(PAUTA_STATUS, p.status))}</span>
+    </span>
+  </button>`;
 }
 async function openPauta(id) {
   if (S.pautaDirty && !(await autosavePauta()) && !confirm('A pauta atual ainda não pôde ser salva no sistema. Ela fica guardada como rascunho neste navegador. Continuar?')) return;
@@ -441,7 +462,7 @@ function renderPautaEditor() {
   const p = S.pauta;
   const ws = $('.ws-pautas'); if (ws) ws.classList.toggle('show-editor', !!p);
   if (p && !S.perms.edit) {   // licença de leitura: ficha de consulta
-    el.innerHTML = `<div class="pane-h"><button class="btn sm mob-only" id="p-back">‹ Voltar</button><h2>Consulta da pauta</h2><div style="flex:1"></div><button class="btn sm mob-only" id="p-view">👁 Visualizar</button><button class="btn primary sm" id="p-print">Baixar PDF / Imprimir</button></div><div class="pane-b">${fichaHtml(p)}</div>`;
+    el.innerHTML = `<div class="pane-h"><button class="btn sm" id="p-back">‹ Voltar</button><h2>Consulta da pauta</h2><div style="flex:1"></div><button class="btn sm mob-only" id="p-view">👁 Visualizar</button><button class="btn primary sm" id="p-print">Baixar PDF / Imprimir</button></div><div class="pane-b">${fichaHtml(p)}</div>`;
     $('#p-print').onclick = () => printPauta(p); $('#p-view').onclick = () => verDocumento(p); $('#p-back').onclick = fecharEditor; return;
   }
   if (!p) { el.innerHTML = `<div class="pane-h"><h2>Pauta</h2></div><div class="empty">Selecione uma pauta na lista ou crie uma nova.<br><br><span class="hint">Atalho: Ctrl+S salva a pauta aberta.</span></div>`; return; }
@@ -604,7 +625,7 @@ function renderPautaEditor() {
   bindPautaHead(p);
 }
 function pautaHeadHtml(p, ro) {
-  return `<div class="pane-h"><button class="btn sm mob-only" id="p-back">‹ Voltar</button><h2>${p.id ? 'Pauta' : 'Nova pauta'}</h2>
+  return `<div class="pane-h"><button class="btn sm" id="p-back">‹ Voltar</button><h2>${p.id ? 'Pauta' : 'Nova pauta'}</h2>
     <span class="savestate ${S.pautaDirty ? 'dirty' : ''}" id="pstate">${S.pautaDirty ? 'Alterações não salvas' : p.id ? 'Salva' : 'Não salva'}</span>
     <div class="formbar">
       <button class="btn primary sm" id="p-save" ${ro}>Salvar</button>
@@ -762,16 +783,16 @@ async function autosavePauta() {
 }
 // rascunhos que ficaram para trás (página fechada antes de salvar)
 function offerDraftRestore() {
-  const d = readDraft(null); const el = $('#pauta-editor');
+  const d = readDraft(null); const el = $('#pauta-list');
   if (!d || !el || (S.pauta && S.pautaDirty)) return;
   const when = new Date(d.at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   const bar = document.createElement('div'); bar.className = 'banner draftbar';
   bar.innerHTML = `📝 Há uma <b>nova pauta não salva</b>${d.p.retranca ? ` (<b>${esc(d.p.retranca)}</b>)` : ''}, de ${when}. <button class="btn sm primary" data-dr="ok">Recuperar</button> <button class="btn sm" data-dr="no">Descartar</button>`;
-  el.prepend(bar);
+  el.before(bar);
   bar.onclick = async (e) => {
     const a = e.target.dataset.dr; if (!a) return;
     if (a === 'no') { if (!confirm('Descartar este rascunho? Ele não poderá ser recuperado.')) return; try { localStorage.removeItem(draftKey(null)); } catch { } bar.remove(); return; }
-    await releaseLocks();
+    bar.remove(); await releaseLocks();
     S.pauta = Object.assign({ entrevistados: [], roteiro: [] }, d.p); delete S.pauta.id; S.pautaDirty = false; S.pConflict = null;
     renderPautaList(); renderPautaEditor(); markPautaDirty(); toast('Rascunho recuperado.');
   };
@@ -2508,7 +2529,7 @@ async function viewEquipe() {
   $('#br-save').onclick = async () => {
     try {
       S.org = Object.assign(S.org, await api('PUT', '/api/org', { name: $('#br-name').value, logo: brLogo, printColor: $('#br-color').value, printFooter: $('#br-foot').value }));
-      $('.topbar .org').textContent = S.org.name; toast('Identidade da emissora salva.');
+      toast('Identidade da emissora salva.');
     } catch (er) { toast(er.message, true); }
   };
   $('#nu').onsubmit = async (e) => { e.preventDefault(); try { await api('POST', '/api/users', Object.fromEntries(new FormData(e.target))); toast(SUPA_MODE ? 'Convite registrado.' : 'Usuário criado.'); viewEquipe(); } catch (er) { toast(er.message, true); } };
