@@ -232,6 +232,7 @@ table.grid { width: 100%; border-collapse: collapse; font-size: 12px; }
 .grid th { position: sticky; top: 0; z-index: 1; background: var(--panel-3); text-align: left; font-weight: 600; color: var(--muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; padding: 6px 6px; border-bottom: 1px solid var(--line-2); white-space: nowrap; }
 .grid td { padding: 5px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
 .grid tr.row { cursor: pointer; }
+.grid tr.row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .grid tr.row:hover td { background: #1f2833; }
 .grid tr.row.sel td { background: var(--row-sel); }
 .grid td.mono, .mono { font-family: var(--mono); }

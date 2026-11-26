@@ -857,6 +857,17 @@ document.addEventListener('keydown', (e) => {
     if (S.view === 'materias' && S.mat) { e.preventDefault(); saveMateria(true); }
   }
 });
+// Espelho: Enter sobre a linha da retranca abre o prompter nela, já rolando na velocidade média de leitura
+document.addEventListener('keydown', async (e) => {
+  if (e.key !== 'Enter' || e.repeat || e.ctrlKey || e.metaKey || e.altKey || S.view !== 'espelho' || !S.rundown) return;
+  if (e.target.closest('input, textarea, select, button, a') || $('.modal-bg, #prompter, #onair')) return;
+  const tr = e.target.closest('tr.row'); const id = tr ? tr.dataset.id : S.selItem;
+  if (!id) return;
+  e.preventDefault();
+  if (id !== S.selItem) await selectItem(id);
+  await flushItem();
+  prompter(id);
+});
 function sendToRundown(p) {
   const md = modal('Enviar pauta ao espelho', `
     <p class="hint">A retranca <b>${esc(p.retranca)}</b> será incluída no espelho escolhido, vinculada a esta pauta.</p>
@@ -980,7 +991,7 @@ function renderRundown() {
     if (!r.isBreak && r.block !== lastBlock) { lastBlock = r.block; head = `<tr class="blockhead"><td colspan="13">BLOCO ${r.block}</td></tr>`; }
     const it = r.it, sel = S.selItem === it.id;
     const lk = it.lock && !it.lock.mine ? ` <span class="lockico" title="Em edição por ${esc(it.lock.name)}">🔒</span>` : '';
-    return head + `<tr class="row ${r.isBreak ? 'break' : ''} ${r.dead ? 'caiu' : ''} ${sel ? 'sel' : ''} ${it.aoArAt ? 'aired' : ''}" data-id="${it.id}" draggable="${!closed}" ${it.aoArAt ? `title="Foi ao ar às ${new Date(it.aoArAt).toLocaleTimeString('pt-BR')} (OK de ${esc(it.aoArPor || '')})"` : ''}>
+    return head + `<tr tabindex="0" class="row ${r.isBreak ? 'break' : ''} ${r.dead ? 'caiu' : ''} ${sel ? 'sel' : ''} ${it.aoArAt ? 'aired' : ''}" data-id="${it.id}" draggable="${!closed}" ${it.aoArAt ? `title="Foi ao ar às ${new Date(it.aoArAt).toLocaleTimeString('pt-BR')} (OK de ${esc(it.aoArPor || '')})"` : ''}>
       <td class="drag" title="Arraste para reordenar">⋮⋮</td>
       <td class="mono">${r.pagina}</td>
       <td class="retr">${esc(it.retranca)}${lk}${it.pautaId ? ' <span class="hint" title="Vinculada a pauta">◆</span>' : ''}</td>
@@ -1582,14 +1593,21 @@ function openOnAir() {
   render();
 }
 
-function prompter() {
-  const rd = S.rundown; if (!rd) return; const C = computeRundown(rd);
+// inicio: id da retranca por onde começar; nesse caso já abre rolando na velocidade média
+function prompter(inicio) {
+  const rd = S.rundown; if (!rd || $('#prompter')) return; const C = computeRundown(rd);
   const parts = C.rows.filter(r => !r.isBreak && !r.dead && (r.it.cabeca || READ_TYPES.includes(r.it.tipo) && r.it.texto));
-  const bg = document.createElement('div');
+  let alvo = null;   // a retranca escolhida ou, se ela não tiver texto, a próxima que tiver
+  if (inicio) {
+    const desde = C.rows.findIndex(r => r.it.id === inicio);
+    alvo = parts.find(r => C.rows.indexOf(r) >= desde);
+    if (!alvo) return toast('Não há texto para o prompter desta retranca em diante.', true);
+  }
+  const bg = document.createElement('div'); bg.id = 'prompter';
   bg.style.cssText = 'position:fixed;inset:0;background:#000;color:#fff;z-index:200;overflow:auto;padding:40px 8vw;font:600 clamp(26px,4.2vw,58px)/1.45 Arial,sans-serif;text-transform:uppercase';
   bg.innerHTML = `<div style="position:fixed;top:10px;right:16px;font:13px var(--sans);text-transform:none;color:#aaa">Espaço: rolar/pausar · ↑↓ velocidade · Esc: sair<br><b id="pr-vel" style="display:block;text-align:right;font-size:15px;color:#e0a526;margin-top:4px"></b></div>` +
-    (parts.length ? parts.map(r => `<div style="color:#e0a526;font-size:.45em;margin-top:1.4em">${r.pagina} · ${esc(r.it.retranca)}</div>
-    <div style="white-space:pre-wrap">${esc(r.it.cabeca).replace(/\[([^\]]*)\]/g, '<span style="color:#6cf;font-size:.6em">[$1]</span>')}${READ_TYPES.includes(r.it.tipo) && r.it.texto ? '\n' + esc(r.it.texto).replace(/\[([^\]]*)\]/g, '<span style="color:#6cf;font-size:.6em">[$1]</span>') : ''}</div>`).join('') : '<p>Sem textos de apresentação.</p>') + '<div style="height:80vh"></div>';
+    (parts.length ? parts.map(r => `<section data-pr="${r.it.id}"><div style="color:#e0a526;font-size:.45em;padding-top:1.4em">${r.pagina} · ${esc(r.it.retranca)}</div>
+    <div style="white-space:pre-wrap">${esc(r.it.cabeca).replace(/\[([^\]]*)\]/g, '<span style="color:#6cf;font-size:.6em">[$1]</span>')}${READ_TYPES.includes(r.it.tipo) && r.it.texto ? '\n' + esc(r.it.texto).replace(/\[([^\]]*)\]/g, '<span style="color:#6cf;font-size:.6em">[$1]</span>') : ''}</div></section>`).join('') : '<p>Sem textos de apresentação.</p>') + '<div style="height:80vh"></div>';
   document.body.appendChild(bg);
   // velocidade em pixels por segundo (igual em qualquer monitor); começa devagar
   const MIN = 10, MAX = 300, PASSO = 5;
@@ -1608,9 +1626,25 @@ function prompter() {
     if (e.key === 'ArrowDown') { e.preventDefault(); speed = Math.max(MIN, speed - PASSO); }
     showSpeed();
   };
-  showSpeed();
   if (document.activeElement) document.activeElement.blur();   // Espaço não deve reacionar o botão Prompter
   document.addEventListener('keydown', key);
+  if (alvo) {
+    // velocidade média: a altura dos textos dividida pelo tempo de leitura deles (palavras/min do telejornal)
+    const wpm = (rd.program && rd.program.wpm) || 170;
+    let altura = 0, segundos = 0;
+    parts.forEach(r => {
+      const seg = readSec(r.it.cabeca, wpm) + (READ_TYPES.includes(r.it.tipo) ? readSec(r.it.texto, wpm) : 0);
+      const corpo = $(`[data-pr="${r.it.id}"]`, bg).lastElementChild;
+      if (seg) { altura += corpo.offsetHeight; segundos += seg; }
+    });
+    if (segundos) speed = Math.max(MIN, Math.min(MAX, MIN + Math.round((altura / segundos - MIN) / PASSO) * PASSO));
+    // o texto escolhido começa um pouco abaixo do topo, e a rolagem já parte
+    const sec = $(`[data-pr="${alvo.it.id}"]`, bg);
+    bg.style.paddingTop = '30vh';
+    bg.scrollTop = Math.max(0, sec.offsetTop - bg.clientHeight * 0.2);
+    run = true; pos = bg.scrollTop; raf = requestAnimationFrame(loop);
+  }
+  showSpeed();
 }
 
 // =============================================================== MATÉRIAS (espaço de redação do repórter)
