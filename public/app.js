@@ -363,6 +363,7 @@ async function viewPautas() {
     </aside>
     <section class="pane"><div class="pane-h"><h2>Pautas</h2><span class="hint" id="pf-label"></span><div style="flex:1"></div>
         <button class="btn sm mob-only" id="pf-toggle" aria-expanded="false">Filtros</button>
+        <button class="btn sm" id="pf-capa" title="Cronograma das pautas do dia seguinte">🗒 Capa da pauta</button>
         <button class="btn sm" id="pf-print">Imprimir lista</button><button class="btn primary sm" id="pf-new">+ Nova pauta</button></div>
       <div class="pane-b" id="pauta-list"></div></section>
     <section class="pane editor" id="pauta-editor"></section>
@@ -381,6 +382,7 @@ async function viewPautas() {
   $('#pf-new').onclick = () => openPauta(null);
   $('#pf-toggle').onclick = (e) => { const on = $('.ws-pautas').classList.toggle('show-filters'); e.target.setAttribute('aria-expanded', on); };
   $('#pf-print').onclick = printPautaList;
+  $('#pf-capa').onclick = openCapa;
   $('#pauta-list').onclick = e => {
     const v = e.target.closest('[data-view]'); if (v) return verDocumento(v.dataset.view);
     const r = e.target.closest('[data-id]'); if (r) (isMobile() ? openFicha : openPauta)(r.dataset.id);
@@ -1423,6 +1425,123 @@ function printPautaList() {
     <table><tr><th>Retranca</th><th>Data</th><th>Hora</th><th>Status</th><th>Editoria</th><th>Repórter</th><th>Local</th><th>Proposta</th></tr>
     ${S.pautas.map(p => `<tr><td><b>${esc(p.retranca)}</b></td><td>${fmtDate(p.data)}</td><td>${esc(p.horario)}</td><td>${esc(label(PAUTA_STATUS, p.status))}</td><td>${esc(p.editoria)}</td><td>${esc(repName(p))}</td><td>${esc(p.local)}</td><td>${esc(p.proposta)}</td></tr>`).join('')}</table>`);
 }
+// =============================================================== CAPA DA PAUTA (cronograma do dia seguinte)
+const capaObsKey = (d) => `redacao:capa-obs:${d}`;
+const lerCapaObs = (d) => { try { return localStorage.getItem(capaObsKey(d)) || ''; } catch { return ''; } };
+const guardarCapaObs = (d, v) => { try { v ? localStorage.setItem(capaObsKey(d), v) : localStorage.removeItem(capaObsKey(d)); } catch { /* armazenamento indisponível */ } };
+const capaTitulo = (d) => `${weekday(d).replace(/^./, c => c.toUpperCase())}, ${fmtDate(d)}`;
+// cada pauta vira uma linha do cronograma: [horário, pauta, equipe, local e marcação]; cada célula é uma lista de linhas
+function capaLinhas(lista) {
+  return lista.map(p => {
+    const prog = p.programaId ? (S.programs.find(x => x.id === p.programaId) || {}).name || '' : '';
+    const par = (r, v) => v ? `${r}: ${v}` : '';
+    const marc = (p.entrevistados || []).filter(e => e.nome).map(e => [e.horario, e.nome, e.funcao, e.telefone, e.confirmado ? '' : '(a confirmar)'].filter(Boolean).join(' · '));
+    return {
+      hora: p.horario || '—',
+      retranca: p.retranca,
+      pauta: [[prog, p.editoria, p.formato].filter(Boolean).join(' · '), label(PAUTA_STATUS, p.status), p.status === 'caiu' ? par('Motivo', p.motivoQueda) : ''].filter(Boolean),
+      equipe: [par('Repórter', repName(p)), par('Cinegrafista', p.cinegrafista), par('Motorista', p.motorista), par('Produção', prodName(p))].filter(Boolean),
+      local: [[p.local, p.endereco].filter(Boolean).join(' — '), ...marc].filter(Boolean),
+    };
+  });
+}
+function capaHtml(d, linhas, obs) {
+  const o = S.org || {};
+  const cel = (arr) => `<div>${arr.map(x => `<div>${esc(x)}</div>`).join('') || '—'}</div>`;
+  return `<div class="doc">
+    <div class="doc-h"><div class="doc-logo">${o.logo ? `<img src="${esc(o.logo)}" alt="">` : `<div class="doc-org">${esc(o.name || '')}</div>`}</div>
+      <div class="doc-t"><div class="doc-kind">CAPA DA PAUTA</div><div class="doc-retr">Cronograma do dia</div><div class="doc-sub" style="text-transform:none">${esc(capaTitulo(d))} · ${linhas.length} pauta(s)</div></div></div>
+    ${linhas.length ? `<table class="doc-tab doc-capa"><thead><tr><th style="width:56px">Horário</th><th style="width:30%">Pauta</th><th style="width:26%">Equipe</th><th>Local e marcação</th></tr></thead><tbody>
+      ${linhas.map(l => `<tr><td data-l="Horário"><div><b>${esc(l.hora)}</b></div></td><td data-l="Pauta"><div><b>${esc(l.retranca)}</b>${l.pauta.map(x => `<div>${esc(x)}</div>`).join('')}</div></td><td data-l="Equipe">${cel(l.equipe)}</td><td data-l="Local">${cel(l.local)}</td></tr>`).join('')}
+    </tbody></table>` : '<p>Nenhuma pauta marcada para esta data.</p>'}
+    ${obs.trim() ? `<div class="doc-sec"><div class="doc-st">Observações do dia</div><div class="doc-txt">${esc(obs)}</div></div>` : ''}
+  </div>`;
+}
+function openCapa() {
+  const o = S.org || {};
+  const brand = /^#[0-9a-fA-F]{6}$/.test(o.printColor || '') ? o.printColor : '#0b3566';
+  const amanha = addDays(today(), 1);
+  const md = modal('Capa da pauta', `
+    <div class="capa-form">
+      <div class="field"><label for="capa-data">Data do cronograma</label><input type="date" id="capa-data" value="${amanha}"></div>
+      <label class="check"><input type="checkbox" id="capa-caiu"> Incluir pautas que caíram</label>
+      <div class="field capa-obs"><label for="capa-obs">Observações do dia (opcional)</label><textarea id="capa-obs" rows="2" placeholder="Plantão, avisos à equipe, equipamentos…">${esc(lerCapaObs(amanha))}</textarea>
+        <span class="hint">As observações entram no documento e ficam guardadas só neste aparelho.</span></div>
+    </div>
+    <div class="${isMobile() ? 'docview ' : ''}capa-view pdf-render"><div class="docs" style="--brand:${brand}" id="capa-doc"></div></div>`,
+    { wide: true, footer: '<button class="btn" data-close>Fechar</button><button class="btn" id="capa-print" disabled>Imprimir</button><button class="btn primary" id="capa-pdf" disabled>⬇ Baixar PDF</button>' });
+  md.el.classList.add('ficha-modal', 'capa-modal'); if (document.activeElement) document.activeElement.blur();
+  const data = $('#capa-data', md.el), obs = $('#capa-obs', md.el), caiu = $('#capa-caiu', md.el);
+  let todas = [], pronta = false, seq = 0;
+  const linhas = () => capaLinhas(todas.filter(p => caiu.checked || p.status !== 'caiu'));
+  const botoes = () => $$('#capa-print, #capa-pdf', md.el).forEach(b => { b.disabled = !pronta; });
+  const desenhar = () => { if (pronta) $('#capa-doc', md.el).innerHTML = capaHtml(data.value, linhas(), obs.value); };
+  const carregar = async () => {
+    const meu = ++seq, d = data.value; pronta = false; botoes();
+    if (!d) { $('#capa-doc', md.el).innerHTML = '<p>Escolha a data.</p>'; return; }
+    $('#capa-doc', md.el).innerHTML = '<p>Carregando…</p>';
+    try {
+      const lista = await api('GET', `/api/pautas?from=${d}&to=${d}`);
+      if (meu !== seq) return;   // a data mudou enquanto carregava
+      todas = lista.sort((a, b) => (a.horario || '99').localeCompare(b.horario || '99') || a.retranca.localeCompare(b.retranca));
+      pronta = true; botoes(); desenhar();
+    } catch (e) { if (meu === seq) { $('#capa-doc', md.el).innerHTML = '<p>Não foi possível carregar as pautas.</p>'; toast(e.message, true); } }
+  };
+  data.onchange = () => { obs.value = lerCapaObs(data.value); carregar(); };
+  caiu.onchange = desenhar;
+  obs.oninput = () => { guardarCapaObs(data.value, obs.value); desenhar(); };
+  $('#capa-print', md.el).onclick = () => {
+    const foot = `<div class="doc-f"><span>${esc(`${o.name || ''}${o.printFooter ? ' · ' + o.printFooter : ''}`)}</span><span>${esc(`Impresso por ${S.me.name} em ${new Date().toLocaleString('pt-BR')}`)}</span></div>`;
+    const titulo = document.title; document.title = `CAPA DA PAUTA - ${fmtDate(data.value).replace(/\//g, '-')}`;
+    $('#print-area').innerHTML = `<div class="docs" style="--brand:${brand}">${capaHtml(data.value, linhas(), obs.value)}${foot}</div>`;
+    Promise.all($$('#print-area img').map(i => i.complete ? 1 : new Promise(r => { i.onload = i.onerror = r; }))).then(() => { window.print(); setTimeout(() => { document.title = titulo; }, 1000); });
+  };
+  $('#capa-pdf', md.el).onclick = () => capaPdf(data.value, linhas(), obs.value, brand);
+  carregar();
+}
+async function capaPdf(d, linhas, obs, brandHex) {
+  toast('Gerando PDF…');
+  try {
+    if (!window.jspdf) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+    if (!window.jspdf.jsPDF.API.autoTable) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js');
+  } catch { return toast('Não foi possível carregar o gerador de PDF. Verifique a internet ou use Imprimir → Salvar como PDF.', true); }
+  try {
+    const o = S.org || {};
+    const doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', compress: true });
+    doc.setProperties({ title: `Capa da pauta ${fmtDate(d)}`, author: o.name || '', creator: 'Redação' });
+    const W = 210, H = 297, M = 14;
+    const B = [1, 3, 5].map(i => parseInt(brandHex.slice(i, i + 2), 16));
+    const font = (style, size, color) => { doc.setFont('helvetica', style); doc.setFontSize(size); doc.setTextColor(...(color || [20, 22, 26])); };
+    const logo = await pdfLogo(o.logo);
+    if (logo) { const s = Math.min(50 / logo.w, 20 / logo.h); doc.addImage(logo.data, logo.fmt, M, 16 + (20 - logo.h * s) / 2, logo.w * s, logo.h * s, undefined, 'FAST'); }
+    else { font('bold', 15, B); doc.text(pdfSafe(o.name || ''), M, 27); }
+    font('bold', 17); doc.text('CAPA DA PAUTA', W - M, 22, { align: 'right' });
+    font('normal', 11); doc.text(pdfSafe(capaTitulo(d)), W - M, 29, { align: 'right' });
+    font('normal', 9, [90, 96, 105]); doc.text(pdfSafe(`Cronograma do dia · ${linhas.length} pauta(s)`), W - M, 34.5, { align: 'right' });
+    doc.setDrawColor(...B); doc.setLineWidth(1.1); doc.line(M, 39, W - M, 39);
+    const base = { startY: 44, margin: { left: M, right: M, top: 16, bottom: 20 }, theme: 'grid',
+      styles: { font: 'helvetica', fontSize: 8.6, textColor: [20, 22, 26], lineColor: [204, 210, 217], lineWidth: 0.2, cellPadding: 1.8, valign: 'top' },
+      headStyles: { fillColor: B, textColor: 255, fontStyle: 'bold', fontSize: 7.4, lineColor: B } };
+    const txt = (arr) => pdfSafe(arr.join('\n') || '—');
+    doc.autoTable(Object.assign({}, base, {
+      head: [['HORÁRIO', 'PAUTA', 'EQUIPE', 'LOCAL E MARCAÇÃO']],
+      body: linhas.length ? linhas.map(l => [pdfSafe(l.hora), txt([l.retranca, ...l.pauta]), txt(l.equipe), txt(l.local)]) : [[{ content: 'Nenhuma pauta marcada para esta data.', colSpan: 4 }]],
+      columnStyles: { 0: { cellWidth: 17, fontStyle: 'bold', fontSize: 10 }, 1: { cellWidth: 56, fontStyle: 'bold' }, 2: { cellWidth: 46 } },
+      rowPageBreak: 'avoid',
+    }));
+    if (obs.trim()) doc.autoTable(Object.assign({}, base, { startY: doc.lastAutoTable.finalY + 6, head: [['OBSERVAÇÕES DO DIA']], body: [[pdfSafe(obs)]], styles: Object.assign({}, base.styles, { fontSize: 10 }) }));
+    const n = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= n; i++) {
+      doc.setPage(i); doc.setDrawColor(214, 219, 225); doc.setLineWidth(0.3); doc.line(M, H - 13, W - M, H - 13);
+      font('normal', 7.5, [90, 96, 105]);
+      doc.text(pdfSafe(`${o.name || ''}${o.printFooter ? ' · ' + o.printFooter : ''}`), M, H - 9);
+      doc.text(pdfSafe(`Gerado por ${S.me.name} em ${new Date().toLocaleString('pt-BR')} · página ${i} de ${n}`), W - M, H - 9, { align: 'right' });
+    }
+    doc.save(`CAPA DA PAUTA - ${fmtDate(d).replace(/\//g, '-')}.pdf`);
+    toast('PDF baixado.');
+  } catch (e) { console.error(e); toast('Erro ao gerar o PDF: ' + e.message, true); }
+}
+
 function printRundown() {
   const rd = S.rundown; if (!rd) return; const C = computeRundown(rd);
   const withScripts = confirm('Incluir as laudas (textos) na impressão?\nOK = espelho + laudas · Cancelar = só o espelho');
