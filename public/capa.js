@@ -134,7 +134,7 @@ function capaNomes() {
   const uniq = (a) => [...new Set(a.map(s => String(s || '').trim()).filter(Boolean))].sort((x, y) => x.localeCompare(y, 'pt-BR'));
   const equipe = funcionarios();
   return Object.fromEntries(CAPA_PESSOAS.map(([k, , funcoes, perfis]) => [k,
-    uniq([...equipe.filter(f => funcoes.includes(f.funcao)).map(f => f.nome), ...S.users.filter(u => u.active && perfis.includes(u.role)).map(u => u.name)])]));
+    uniq([...equipe.filter(f => temFuncao(f, funcoes)).map(f => f.nome), ...S.users.filter(u => u.active && perfis.includes(u.role)).map(u => u.name)])]));
 }
 
 function openCapa() {

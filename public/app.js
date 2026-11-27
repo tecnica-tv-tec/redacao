@@ -165,6 +165,28 @@ function funcionarios() {
   return lista;
 }
 
+// quem acumula funções ("Repórter cinematográfico e Editor") entra na lista de cada uma delas
+const APELIDOS_FUNCAO = [
+  [/^diretora? de producao/, [CARGO_DIRETOR]],
+  [/^chefe de reportagem$/, ['Chefe de reportagem']],
+  [/^produtora?$/, ['Produtor']],
+  [/^(reporter cinematografic[oa]|cinegrafista)$/, ['Repórter cinematográfico']],
+  [/^reporter$/, ['Repórter']],
+  [/^motorista$/, ['Motorista']],
+  [/^editora? de textos?$/, ['Editor de texto']],
+  [/^editora? de (imagem|imagens|video|videos|vt)$/, ['Editor de imagens']],
+  [/^(editora?|edicao)$/, ['Editor de texto', 'Editor de imagens']],   // "Editor" sem especificar vale para os dois
+  [/^apresentadora?$/, ['Apresentador']],
+  [/^estagiari[oa]$/, ['Estagiário']],
+];
+function funcoesDe(texto) {
+  const t = String(texto || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ')
+    .replace(/producao e multimidia/g, 'producao')   // esse "e" faz parte do nome do cargo
+    .replace(/(editora?) de (textos?|imagens?) e (de )?(textos?|imagens?)\b/g, '$1 de $2 e $1 de $4');
+  return t.split(/\s*(?:[,;\/+&|]|\s-\s|\be\b)\s*/).flatMap(parte => (APELIDOS_FUNCAO.find(([re]) => re.test(parte.trim())) || [null, []])[1]);
+}
+const temFuncao = (f, funcoes) => funcoesDe(f.funcao).some(x => funcoes.includes(x));
+
 // =============================================================== login
 function renderLogin(mode = 'login') {
   stopPolling();
@@ -826,7 +848,7 @@ function teamLists() {
   const used = (k) => (S.pautas || []).map(x => x[k]);
   const todos = funcionarios();
   const nomes = (funcoes, roles, campo) => uniq([
-    ...todos.filter(f => funcoes.includes(f.funcao)).map(f => f.nome),
+    ...todos.filter(f => temFuncao(f, funcoes)).map(f => f.nome),
     ...S.users.filter(u => u.active && roles.includes(u.role)).map(u => u.name),
     ...(campo ? used(campo) : [])]);
   const dl = (id, list) => `<datalist id="${id}">${list.map(n => `<option value="${esc(n)}"></option>`).join('')}</datalist>`;
@@ -2413,6 +2435,22 @@ function readLogo(file) {
     fr.readAsDataURL(file);
   });
 }
+// liga o funcionário à conta de acesso pelo nome: igual, ou mesmo primeiro e último nome (se só houver uma)
+const nomeChave = (n) => String(n || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
+function contaDe(nome, contas) {
+  const alvo = nomeChave(nome), pontas = (n) => { const p = nomeChave(n).split(' '); return p.length > 1 ? `${p[0]} ${p[p.length - 1]}` : ''; };
+  const iguais = contas.filter(u => nomeChave(u.name) === alvo);
+  if (iguais.length) return iguais.length === 1 ? iguais[0] : null;
+  const parecidas = pontas(nome) ? contas.filter(u => pontas(u.name) === pontas(nome)) : [];
+  return parecidas.length === 1 ? parecidas[0] : null;
+}
+// perfil sugerido ao dar acesso (o administrador pode trocar)
+function perfilSugerido(funcao) {
+  const f = funcoesDe(funcao);
+  const par = [[CARGO_DIRETOR, 'diretor'], ['Chefe de reportagem', 'chefe'], ['Apresentador', 'apresentador'], ['Repórter', 'reporter'], ['Produtor', 'produtor'], ['Editor de imagens', 'editor_imagem'], ['Editor de texto', 'editor'], ['Estagiário', 'estagiario']].find(([n]) => f.includes(n));
+  return par ? par[1] : 'reporter';
+}
+
 async function viewEquipe() {
   S.users = await api('GET', '/api/users');
   const adm = S.perms.manageUsers;
@@ -2443,7 +2481,7 @@ async function viewEquipe() {
       <p class="hint">Permissões da função: <b>Administrador</b> gerencia equipe e tudo mais · <b>Diretor de Produção e Multimídia</b> gerencia telejornais e funcionários, aprova espelhos e exclui pautas · <b>Chefe de reportagem</b> e <b>Editor</b> fecham e aprovam espelhos · <b>Produtor</b> cria e exclui pautas · <b>Repórter</b>, <b>Apresentador</b> e <b>Estagiário</b> editam pautas e laudas.</p>
     </div></div>` : ''}
     ${S.perms.managePrograms ? `<div class="card"><div class="pad"><h3 style="margin-top:0">Funcionários</h3>
-      <p class="hint" style="margin-top:0">Cadastre quem trabalha na redação e a função de cada pessoa. Os nomes aparecem como sugestão nos campos de <b>Equipe</b> da pauta, onde também dá para escrever um nome à mão. Não cria acesso ao sistema.</p>
+      <p class="hint" style="margin-top:0">Cadastre quem trabalha na redação e a função de cada pessoa. Os nomes aparecem como sugestão nos campos de <b>Equipe</b> da pauta, onde também dá para escrever um nome à mão. Quem tem duas funções pode ser cadastrado com as duas juntas (ex.: <b>Repórter cinematográfico e Editor</b>) e aparece na lista de cada uma. ${adm ? 'Em <b>Licença</b> você autoriza o que cada pessoa acessa: <b>Leitura</b> só consulta · <b>Edição</b> também cria e edita pautas e matérias · <b>Geral</b> inclui o espelho. Quem ainda não tem login recebe o botão <b>Dar acesso</b>.' : 'A licença de cada pessoa é definida pelo administrador.'}</p>
       <form id="fn-add" class="fn-form" autocomplete="off">
         <div class="field"><label>Nome</label><input type="text" name="nome" maxlength="80" required placeholder="Nome e sobrenome"></div>
         <div class="field"><label>Função</label><input type="text" name="funcao" list="dl-funcoes" maxlength="80" required placeholder="Escolha ou escreva a função"></div>
@@ -2469,10 +2507,45 @@ async function viewEquipe() {
       </div></div></div>` : ''}</div>`;
   if (S.perms.managePrograms) {
     let lista = funcionarios();
+    const celulaLicenca = (f) => {
+      const u = contaDe(f.nome, S.users);
+      if (u) {
+        const campo = adm && u.role !== 'admin' ? `<select data-fnlic="${u.id}" aria-label="Licença de ${esc(f.nome)}">${opts(LICENCAS, u.licenca)}</select>`
+          : `<b>${esc(label(LICENCAS, u.licenca))}</b>${u.role === 'admin' ? ' <span class="hint">(administrador)</span>' : ''}`;
+        const ativar = u.active ? '' : ` <span class="pill st-caiu">Inativo</span>${adm ? ` <button class="btn sm" type="button" data-fnativar="${u.id}">Ativar</button>` : ''}`;
+        return `<div class="fn-lic">${campo}${ativar}</div><div class="hint">${esc(u.email)}</div>`;
+      }
+      const conv = invites.find(i => nomeChave(i.name) === nomeChave(f.nome));
+      if (conv) return `<b>${esc(label(LICENCAS, conv.licenca || 'leitura'))}</b> <span class="hint">· convite pendente</span><div class="hint">${esc(conv.email)}</div>`;
+      return `<div class="fn-lic"><span class="hint">Sem acesso</span>${adm ? ' <button class="btn sm" type="button" data-fnacesso>Dar acesso</button>' : ''}</div>`;
+    };
+    const reabrir = async () => { await viewEquipe(); const el = $('#fn-list'); if (el) el.scrollIntoView({ block: 'center' }); };
+    const darAcesso = (f) => {
+      const livres = S.users.filter(u => !lista.some(x => contaDe(x.nome, S.users) === u));
+      const md = modal('Dar acesso — ' + f.nome, `<form id="fa" autocomplete="off">
+        ${livres.length ? `<div class="field"><label>Já tem login com outro nome?<select name="conta"><option value="">Não, é um acesso novo</option>${livres.map(u => `<option value="${u.id}">${esc(u.name)} — ${esc(u.email)}</option>`).join('')}</select></label><div class="hint">Ao vincular, o nome da conta passa a ser “${esc(f.nome)}”.</div></div>` : ''}
+        <div id="fa-novo"><div class="field"><label>E-mail corporativo<input type="email" name="email" required></label></div>
+          ${SUPA_MODE ? '' : '<div class="field"><label>Senha inicial (mín. 8)<input type="password" name="password" required minlength="8" autocomplete="new-password"></label></div>'}
+          <div class="field"><label>Perfil<select name="role">${opts(S.roles.map(r => [r.id, r.label]).filter(r => r[0] !== 'admin'), perfilSugerido(f.funcao))}</select></label></div></div>
+        <div class="field"><label>Licença<select name="licenca">${opts(LICENCAS, 'leitura')}</select></label></div>
+        ${SUPA_MODE ? '<p class="hint">Em um acesso novo, a pessoa entra em “Criar conta” com este e-mail.</p>' : ''}
+        <div class="err" id="faerr"></div><button class="btn primary">Autorizar</button></form>`);
+      const form = $('#fa', md.el);
+      if (form.conta) form.conta.onchange = () => { const novo = $('#fa-novo', md.el); novo.hidden = !!form.conta.value; $$('input, select', novo).forEach(c => { c.disabled = novo.hidden; }); };
+      form.onsubmit = async (ev) => {
+        ev.preventDefault();
+        const v = Object.fromEntries(new FormData(form));
+        try {
+          if (v.conta) await api('PUT', '/api/users/' + v.conta, { name: f.nome, ...(S.users.find(u => u.id === v.conta).role === 'admin' ? {} : { licenca: v.licenca }) });
+          else await api('POST', '/api/users', { name: f.nome, email: v.email, password: v.password, role: v.role, licenca: v.licenca });
+          md.close(); toast(v.conta ? 'Conta vinculada.' : SUPA_MODE ? 'Convite registrado.' : 'Acesso criado.'); reabrir();
+        } catch (er) { $('#faerr', md.el).textContent = er.message; }
+      };
+    };
     const draw = () => {
       const ord = lista.map((f, i) => ({ ...f, i })).sort((a, b) => a.funcao.localeCompare(b.funcao, 'pt-BR') || a.nome.localeCompare(b.nome, 'pt-BR'));
-      $('#fn-list').innerHTML = ord.length ? `<table class="grid"><thead><tr><th>Nome</th><th>Função</th><th></th></tr></thead><tbody>
-        ${ord.map(f => `<tr data-i="${f.i}"><td><b>${esc(f.nome)}</b></td><td><input type="text" list="dl-funcoes" value="${esc(f.funcao)}" maxlength="80" aria-label="Função de ${esc(f.nome)}"></td><td><button class="btn sm danger" type="button" data-fndel>Remover</button></td></tr>`).join('')}
+      $('#fn-list').innerHTML = ord.length ? `<table class="grid fn-tab"><thead><tr><th>Nome</th><th>Função</th><th>Licença</th><th></th></tr></thead><tbody>
+        ${ord.map(f => `<tr data-i="${f.i}"><td><b>${esc(f.nome)}</b></td><td><input type="text" list="dl-funcoes" value="${esc(f.funcao)}" maxlength="80" aria-label="Função de ${esc(f.nome)}"></td><td>${celulaLicenca(f)}</td><td><button class="btn sm danger" type="button" data-fndel>Remover</button></td></tr>`).join('')}
         </tbody></table>` : '<div class="hint">Nenhum funcionário cadastrado ainda.</div>';
     };
     const save = async (nova, ok) => {
@@ -2486,12 +2559,23 @@ async function viewEquipe() {
       if (lista.some(f => f.nome.toLowerCase() === nome.toLowerCase() && f.funcao.toLowerCase() === funcao.toLowerCase())) return toast('Essa pessoa já está cadastrada nessa função.', true);
       if (await save([...lista, { nome, funcao }], 'Funcionário adicionado.')) { form.reset(); form.nome.focus(); }
     };
-    $('#fn-list').onchange = (e) => {
-      e.stopPropagation(); const i = +e.target.closest('tr').dataset.i, funcao = e.target.value.trim();
+    $('#fn-list').onchange = async (e) => {
+      e.stopPropagation();
+      if (e.target.dataset.fnlic) {
+        try { await api('PUT', '/api/users/' + e.target.dataset.fnlic, { licenca: e.target.value }); toast('Licença alterada.'); } catch (er) { toast(er.message, true); }
+        return reabrir();
+      }
+      const i = +e.target.closest('tr').dataset.i, funcao = e.target.value.trim();
       if (!funcao) return draw();
       save(lista.map((f, n) => n === i ? { nome: f.nome, funcao } : f), 'Função atualizada.');
     };
-    $('#fn-list').onclick = (e) => {
+    $('#fn-list').onclick = async (e) => {
+      e.stopPropagation();
+      if (e.target.dataset.fnativar) {
+        try { await api('PUT', '/api/users/' + e.target.dataset.fnativar, { active: true }); toast('Acesso ativado.'); } catch (er) { toast(er.message, true); }
+        return reabrir();
+      }
+      if (e.target.matches('[data-fnacesso]')) return darAcesso(lista[+e.target.closest('tr').dataset.i]);
       if (!e.target.matches('[data-fndel]')) return; const i = +e.target.closest('tr').dataset.i;
       if (confirm(`Remover ${lista[i].nome} (${lista[i].funcao}) do cadastro?`)) save(lista.filter((_, n) => n !== i), 'Funcionário removido.');
     };

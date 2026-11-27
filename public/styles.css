@@ -869,3 +869,8 @@ textarea.mat-text { flex: 1; min-height: 320px; margin: 12px 18px; width: auto; 
   .timers { margin-left: 0; }
   .ws-espelho .pane-b { overflow-x: auto; }
 }
+
+/* licença na lista de funcionários */
+.fn-lic { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.fn-lic select { width: auto; }
+#fn-list { overflow-x: auto; }
