@@ -146,7 +146,7 @@ function seedDemo() {
     materiaStatus: 'aprovada', materiaAutorId: rep2.id, materiaAt: now(),
     materia: '[OFF]\nA fila começou cedo na UBS Vila Nova. Desde hoje, qualquer pessoa pode tomar a vacina contra a gripe.\n\n[SONORA] ANA COSTA / ENFERMEIRA\n"A procura dobrou logo nas primeiras horas."\n\n[OFF]\nA cobertura na cidade está em 48 por cento, longe da meta de 90.\n\n[PASSAGEM] RICARDO ALVES\nPara se vacinar, é só levar um documento com foto a qualquer posto de saúde.' });
   P({ retranca: 'PREVISÃO DO TEMPO', editoria: 'Tempo', status: 'sugestao', produtorId: prod.id, programaId: jn.id, formato: 'NOTA', proposta: 'Frente fria chega no fim de semana. Temperatura pode cair 10 graus.' });
-  P({ retranca: 'FINAL CAMPEONATO', editoria: 'Esporte', status: 'em_producao', produtorId: chefe.id, reporterId: rep1.id, programaId: jn.id, formato: 'LINK', proposta: 'Link ao vivo do estádio com a expectativa para a final.' });
+  P({ retranca: 'FINAL CAMPEONATO', editoria: 'Esporte', status: 'em_producao', produtorId: chefe.id, reporterId: rep1.id, programaId: jn.id, formato: 'LINK', proposta: 'Link do estádio com a expectativa para a final.' });
 
   const rd = { id: uid(), orgId: org.id, programId: jn.id, data: today, status: 'aberto', notas: '', createdAt: now(), updatedAt: now() };
   db.rundowns.push(rd);

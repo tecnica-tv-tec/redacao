@@ -117,6 +117,9 @@ input[type=text], input[type=email], input[type=password], input[type=date], inp
 input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 input[readonly], textarea[readonly], select:disabled, input:disabled, textarea:disabled { opacity: .7; }
 textarea { resize: vertical; min-height: 60px; }
+/* o que a pessoa digita fica branco, mesmo dentro de um rótulo cinza */
+label input, label select, label textarea { color: var(--text); }
+label input::placeholder, label textarea::placeholder { color: var(--muted); }
 .btn { border: 1px solid var(--line-2); background: var(--panel-3); padding: 6px 12px; border-radius: 5px; cursor: pointer; white-space: nowrap; }
 .btn:hover { border-color: var(--muted); }
 .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }

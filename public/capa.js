@@ -1,16 +1,15 @@
 // =============================================================== CAPA DA PAUTA (escala do dia no modelo da emissora)
 // Fica guardada por data neste aparelho. O texto copiado usa *asteriscos*, o negrito do WhatsApp.
-const CAPA_TIPOS = [['PAUTA', 'Pauta'], ['VT', 'Pauta VT'], ['LINK', 'Link ao vivo'], ['ESPECIAL', 'Pauta para especiais']];
+const CAPA_TIPOS = [['PAUTA', 'Pauta'], ['VT', 'Pauta VT'], ['LINK', 'Link'], ['ESPECIAL', 'Pauta para especiais']];
 const CAPA_HOBS = ['saída da TV', 'no local'];
 const CAPA_PESSOAS = [
-  // campo, rótulo, funções do cadastro, perfis de acesso, campo da pauta com nomes já usados
-  ['reporter', 'Repórter', ['Repórter', 'Apresentador'], ['reporter', 'apresentador']],
+  // campo, rótulo, funções do cadastro, perfis de acesso
+  ['reporter', 'Repórter', ['Repórter'], ['reporter']],
   ['cinegrafista', 'Cinegrafista', ['Repórter cinematográfico'], []],
   ['motorista', 'Motorista', ['Motorista'], []],
   ['editor', 'Edição', ['Editor de imagens', 'Editor de texto'], ['editor_imagem', 'editor']],
 ];
 const capaKey = (d) => `redacao:capa:${d}`;
-const CAPA_NOMES = 'redacao:capa-nomes';
 const capaLer = (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } };
 const capaGravar = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } };
 // "09:00" → "9h" · "15:30" → "15h30"
@@ -27,12 +26,9 @@ const capaDePauta = (p) => Object.assign(capaItemVazio(p.formato === 'LINK' ? 'L
 function capaBlocos(c) {
   const linhas = (pares) => pares.filter(([, v]) => String(v || '').trim()).map(([r, v]) => `${r}: ${String(v).trim()}`);
   const blocos = [];
-  c.equipes.forEach(e => {
-    const l = linhas([['Horário', capaHora(e.horario)], ['Transporte', e.transporte]]);
-    if (l.length) blocos.push({ titulo: e.nome.trim() || 'Equipe', linhas: l });
-  });
   c.itens.forEach(i => {
-    const t = i.titulo.trim(), n = i.numero.trim(), h = capaHora(i.horario);
+    // "Pauta 4645" digitado no número não pode virar "Pauta Pauta 4645"
+    const t = i.titulo.trim(), n = i.numero.trim().replace(/^((pauta|link|vt)\b\s*)+/i, ''), h = capaHora(i.horario);
     if (!t && !n && !h && !i.local.trim() && !CAPA_PESSOAS.some(([k]) => i[k])) return;   // linha ainda em branco
     const com = (a, b, sep = ' – ') => [a, b].filter(Boolean).join(sep);
     const link = i.tipo === 'LINK';
@@ -55,15 +51,12 @@ function capaHtml(d, c) {
     ${blocos.map(b => `<div class="cp-bloco"><b>${esc(b.titulo)}</b>${b.linhas.map(l => `<div>${esc(l) || '&nbsp;'}</div>`).join('')}</div>`).join('') || '<p>Preencha os campos para montar a capa.</p>'}
   </div>`;
 }
-// nomes para escolher: os da função primeiro, depois o restante da equipe
-function capaNomes(usados) {
+// nomes para escolher: somente quem está cadastrado na função (funcionários e usuários com esse perfil)
+function capaNomes() {
   const uniq = (a) => [...new Set(a.map(s => String(s || '').trim()).filter(Boolean))].sort((x, y) => x.localeCompare(y, 'pt-BR'));
-  const equipe = funcionarios(), extras = capaLer(CAPA_NOMES) || {};
-  const todos = [...equipe.map(f => f.nome), ...S.users.filter(u => u.active).map(u => u.name), ...Object.values(extras).flat(), ...usados.flatMap(i => CAPA_PESSOAS.map(([k]) => i[k]))];
-  return Object.fromEntries(CAPA_PESSOAS.map(([k, , funcoes, perfis]) => {
-    const da = uniq([...equipe.filter(f => funcoes.includes(f.funcao)).map(f => f.nome), ...S.users.filter(u => u.active && perfis.includes(u.role)).map(u => u.name), ...(extras[k] || []), ...usados.map(i => i[k])]);
-    return [k, { da, outras: uniq(todos).filter(n => !da.includes(n)) }];
-  }));
+  const equipe = funcionarios();
+  return Object.fromEntries(CAPA_PESSOAS.map(([k, , funcoes, perfis]) => [k,
+    uniq([...equipe.filter(f => funcoes.includes(f.funcao)).map(f => f.nome), ...S.users.filter(u => u.active && perfis.includes(u.role)).map(u => u.name)])]));
 }
 
 function openCapa() {
@@ -88,22 +81,18 @@ function openCapa() {
 
   const pessoa = (i, n, [k, rotulo], nomes) => {
     const op = (v) => `<option ${v === i[k] ? 'selected' : ''}>${esc(v)}</option>`;
+    const manual = i[k] && !nomes.includes(i[k]) ? i[k] : '';   // nome digitado (ou vindo da pauta): vale só para esta linha
     return `<div class="field"><label for="cp-${k}-${n}">${rotulo}</label>
-      <select id="cp-${k}-${n}" data-i="${n}" data-k="${k}"><option value="">Escolher…</option>
-        ${nomes.da.length ? `<optgroup label="${rotulo}">${nomes.da.map(op).join('')}</optgroup>` : ''}
-        ${nomes.outras.length ? `<optgroup label="Outras pessoas da equipe">${nomes.outras.map(op).join('')}</optgroup>` : ''}
-        <option value="__novo">+ Outro nome…</option></select>
-      <input type="text" class="cp-novo" data-novo="${k}" data-i="${n}" placeholder="Digite o nome e tecle Enter" hidden></div>`;
+      <select id="cp-${k}-${n}" data-i="${n}" data-k="${k}"><option value="">${nomes.length ? 'Escolher…' : 'Ninguém cadastrado'}</option>
+        ${nomes.map(op).join('')}${manual ? op(manual) : ''}
+        <option value="__novo">+ Inserir manualmente…</option></select>
+      <input type="text" class="cp-novo" data-novo="${k}" data-i="${n}" aria-label="${rotulo}: nome manual" placeholder="Digite o nome e tecle Enter" hidden></div>`;
   };
   const campo = (rot, attrs, valor, tipo = 'text', extra = '') => `<div class="field ${extra}"><label>${rot}<input type="${tipo}" ${attrs} value="${esc(valor)}"></label></div>`;
   const desenhar = () => {
     if (!c) return;
-    const nomes = capaNomes(c.itens);
+    const nomes = capaNomes();
     campos.innerHTML = `
-      ${c.equipes.map((e, n) => `<fieldset class="cp-card"><legend>Equipe de apoio</legend>
-        <div class="cp-grid">${campo('Nome da equipe', `data-e="${n}" data-k="nome"`, e.nome, 'text', 'cp-full')}${campo('Horário', `data-e="${n}" data-k="horario"`, e.horario, 'time')}${campo('Transporte', `data-e="${n}" data-k="transporte" placeholder="Ex.: Spin"`, e.transporte)}</div>
-        <button class="btn sm danger" data-acao="tirar-equipe" data-n="${n}">Remover equipe</button></fieldset>`).join('')}
-      <button class="btn sm" data-acao="equipe">+ Equipe de apoio</button>
       ${c.itens.map((i, n) => `<fieldset class="cp-card"><legend>${n + 1}ª pauta</legend>
         <div class="cp-grid">
           <div class="field"><label>Tipo<select data-i="${n}" data-k="tipo">${opts(CAPA_TIPOS, i.tipo)}</select></label></div>
@@ -116,14 +105,13 @@ function openCapa() {
           ${CAPA_PESSOAS.map(def => pessoa(i, n, def, nomes[def[0]])).join('')}
         </div>
         <div class="formbar"><button class="btn sm" data-acao="subir" data-n="${n}" ${n ? '' : 'disabled'} aria-label="Subir pauta">↑</button><button class="btn sm" data-acao="descer" data-n="${n}" ${n < c.itens.length - 1 ? '' : 'disabled'} aria-label="Descer pauta">↓</button><button class="btn sm danger" data-acao="tirar" data-n="${n}">Remover pauta</button></div></fieldset>`).join('')}
-      <div class="cp-add"><button class="btn" data-acao="PAUTA">+ Pauta</button><button class="btn" data-acao="LINK">+ Link ao vivo</button><button class="btn" data-acao="sistema">Trazer pautas do sistema</button></div>
+      <div class="cp-add"><button class="btn" data-acao="PAUTA">+ Pauta</button><button class="btn" data-acao="LINK">+ Link</button><button class="btn" data-acao="sistema">Trazer pautas do sistema</button></div>
       <div class="field"><label>Observações (opcional)<textarea data-k="obs" rows="2" placeholder="Plantão, avisos, equipamentos…">${esc(c.obs)}</textarea></label></div>`;
   };
 
   const mudar = (t) => {
     const k = t.dataset.k; if (!c || !k) return false;
-    if (t.dataset.e != null) c.equipes[+t.dataset.e][k] = t.value;
-    else if (t.dataset.i != null) c.itens[+t.dataset.i][k] = t.value;
+    if (t.dataset.i != null) c.itens[+t.dataset.i][k] = t.value;
     else c[k] = t.value;
     return true;
   };
@@ -138,16 +126,13 @@ function openCapa() {
   const novoNome = (inp) => {
     const nome = inp.value.trim(), k = inp.dataset.novo, n = +inp.dataset.i;
     if (!nome) return;
-    const extras = capaLer(CAPA_NOMES) || {}; extras[k] = [...new Set([...(extras[k] || []), nome])]; capaGravar(CAPA_NOMES, extras);
     c.itens[n][k] = nome; salvar(); desenhar();
   };
   campos.onkeydown = (e) => { if (e.key === 'Enter' && e.target.dataset.novo) { e.preventDefault(); novoNome(e.target); } };
   campos.onclick = (e) => {
     const b = e.target.closest('[data-acao]'); if (!b || !c) return;
     const a = b.dataset.acao, n = +b.dataset.n;
-    if (a === 'equipe') c.equipes.push({ nome: 'Equipe de Mídias', horario: '', transporte: '' });
-    else if (a === 'tirar-equipe') c.equipes.splice(n, 1);
-    else if (a === 'PAUTA' || a === 'LINK') c.itens.push(capaItemVazio(a));
+    if (a === 'PAUTA' || a === 'LINK') c.itens.push(capaItemVazio(a));
     else if (a === 'sistema') {
       const novas = doSistema.filter(p => p.status !== 'caiu' && !c.itens.some(i => i.origem === p.id));
       if (!novas.length) return toast('Não há outras pautas do sistema nesta data.');
@@ -166,7 +151,7 @@ function openCapa() {
     catch (e) { if (meu === seq) toast('Não foi possível trazer as pautas do sistema: ' + e.message, true); }
     if (meu !== seq) return;   // a data mudou enquanto carregava
     dia = d; doSistema = lista.sort((a, b) => (a.horario || '99').localeCompare(b.horario || '99') || a.retranca.localeCompare(b.retranca));
-    c = capaLer(capaKey(d)) || { equipes: [{ nome: 'Equipe de Mídias', horario: '', transporte: '' }], itens: doSistema.filter(p => p.status !== 'caiu').map(capaDePauta), obs: '' };
+    c = capaLer(capaKey(d)) || { itens: doSistema.filter(p => p.status !== 'caiu').map(capaDePauta), obs: '' };
     botoes(); desenhar(); previa();
   };
   data.onchange = carregar;
