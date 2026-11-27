@@ -868,6 +868,11 @@ document.addEventListener('keydown', async (e) => {
   await flushItem();
   prompter(id);
 });
+// Espelho: Esc na caixa de leitura volta à lauda (com prompter, No ar, tela cheia ou janela aberta, o Esc é deles)
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || S.view !== 'espelho' || !S.leitura || $('.modal-bg, #prompter, #onair, #saida, .menu')) return;
+  e.preventDefault(); S.leitura = null; S.ultimoClique = null; renderStory();
+});
 function sendToRundown(p) {
   const md = modal('Enviar pauta ao espelho', `
     <p class="hint">A retranca <b>${esc(p.retranca)}</b> será incluída no espelho escolhido, vinculada a esta pauta.</p>
@@ -1085,7 +1090,7 @@ function renderLeitura(el, it) {
   el.innerHTML = `
     <div class="pane-h"><h2>Leitura</h2><span class="hint">${linha.pagina} · ${esc(it.tipo)} · ${fmtDur(linha.total)}</span><div style="flex:1"></div>
       <div class="formbar"><button class="btn sm" data-lt="-1" aria-label="Diminuir letra" ${tam ? '' : 'disabled'}>A−</button><button class="btn sm" data-lt="1" aria-label="Aumentar letra" ${tam < LEITURA_TAM.length - 1 ? '' : 'disabled'}>A+</button>
-        <button class="btn sm" data-lt="prompter">Prompter</button><button class="btn sm primary" data-lt="lauda">Voltar à lauda</button></div></div>
+        <button class="btn sm" data-lt="prompter">Prompter</button><button class="btn sm primary" data-lt="lauda" title="Esc">Voltar à lauda (Esc)</button></div></div>
     <div class="pane-b lt-corpo" data-id="${it.id}" style="font-size:${LEITURA_TAM[tam]}px">
       <div class="lt-retr">${esc(it.retranca)}</div>
       <div class="lt-quem">${[['Apresentador', it.apresentador], ['Repórter', it.reporter]].filter(x => x[1]).map(([r, v]) => `${r}: <b>${esc(v)}</b>`).join(' · ')}</div>
