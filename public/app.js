@@ -27,6 +27,29 @@ function fmtDur(sec, hours = false) {
   const out = (hours || h) ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
   return (neg ? '-' : '') + out;
 }
+// Campos de tempo: a pessoa digita só números e os dois-pontos entram sozinhos.
+//  data-tempo="ms"  (duração): preenche pela direita, como cronômetro: 1 → 00:01, 130 → 01:30
+//  data-tempo="hms" (início/duração do telejornal): preenche pela esquerda: 1130 → 11:30 → 11:30:00
+function mascaraTempo(v, tipo) {
+  let d = String(v).replace(/\D/g, '');
+  if (tipo === 'ms') { d = d.replace(/^0+/, '').slice(0, 4); return d ? d.padStart(4, '0').replace(/(\d\d)$/, ':$1') : ''; }
+  if (/^[3-9]/.test(d)) d = '0' + d;
+  return (d.slice(0, 6).match(/\d{1,2}/g) || []).join(':');
+}
+// ao sair do campo: completa o horário e converte segundos acima de 59 (00:90 → 01:30)
+function fecharTempo(el) {
+  const v = el.value; if (!v) return;
+  const dois = (n) => String(n).padStart(2, '0'), s = toSec(v);
+  const novo = el.dataset.tempo === 'ms' ? (s < 6000 ? `${dois(Math.floor(s / 60))}:${dois(s % 60)}` : v)
+    : fmtClock(toSec(v.replace(/\D/g, '').padEnd(6, '0').replace(/(\d\d)(?=\d)/g, '$1:')));
+  if (novo !== v) { el.value = novo; el.dispatchEvent(new Event('input', { bubbles: true })); }
+}
+const ehTempo = (e) => e.target && e.target.dataset && e.target.dataset.tempo;
+// captura: a máscara age antes de quem salva o campo
+document.addEventListener('input', (e) => { if (!ehTempo(e)) return; const v = mascaraTempo(e.target.value, e.target.dataset.tempo); if (v !== e.target.value) e.target.value = v; }, true);
+document.addEventListener('focusin', (e) => { if (ehTempo(e)) { const el = e.target; setTimeout(() => { if (document.activeElement === el) el.select(); }, 0); } });
+document.addEventListener('focusout', (e) => { if (ehTempo(e)) fecharTempo(e.target); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && ehTempo(e)) fecharTempo(e.target); }, true);
 function fmtClock(sec) {
   sec = ((Math.round(sec) % 86400) + 86400) % 86400;
   const pad = (n) => String(n).padStart(2, '0');
@@ -1132,9 +1155,9 @@ function renderStory() {
       <div class="field"><label>Retranca</label><input type="text" class="retranca-input" data-f="retranca" value="${F('retranca')}" maxlength="80" ${ro}></div>
       <div class="row3">
         <div class="field"><label>Tipo</label><select data-f="tipo" ${ro}>${opts(TIPOS, it.tipo)}</select></div>
-        ${isBreak ? `<div class="field"><label>Duração do intervalo</label><input type="text" class="mono" data-f="tempoVT" value="${F('tempoVT')}" placeholder="mm:ss" ${ro}></div>` : `
+        ${isBreak ? `<div class="field"><label>Duração do intervalo</label><input type="text" class="mono" data-f="tempoVT" data-tempo="ms" inputmode="numeric" value="${F('tempoVT')}" placeholder="00:00" ${ro}></div>` : `
         <div class="field"><label>Status</label><select data-f="status" ${ro}>${opts(stOpts, it.status)}</select></div>
-        <div class="field"><label>Tempo VT / imagem</label><input type="text" class="mono" data-f="tempoVT" value="${F('tempoVT')}" placeholder="mm:ss" ${ro}></div>`}
+        <div class="field"><label>Tempo VT / imagem</label><input type="text" class="mono" data-f="tempoVT" data-tempo="ms" inputmode="numeric" value="${F('tempoVT')}" placeholder="00:00" ${ro}></div>`}
       </div>
       ${isBreak ? `<div class="field"><label>Observação (comercial, chamadas)</label><textarea data-f="obs" rows="3" ${ro}>${F('obs')}</textarea></div>` : `
       <div class="row3">
@@ -1148,7 +1171,7 @@ function renderStory() {
       <div class="sec"><h3>Cabeça (leitura do apresentador) <span class="grow"></span><span class="readtime" id="rt-cab"></span></h3><div class="sb">
         <textarea class="lauda" data-f="cabeca" rows="6" placeholder="Texto lido pelo apresentador. [Instruções entre colchetes não contam tempo]" ${ro}>${F('cabeca')}</textarea>
         <div class="row2" style="margin-top:8px">
-          <div class="field"><label>Tempo de cabeça manual (opcional)</label><input type="text" class="mono" data-f="tempoCabManual" value="${F('tempoCabManual')}" placeholder="auto" ${ro}></div>
+          <div class="field"><label>Tempo de cabeça manual (opcional)</label><input type="text" class="mono" data-f="tempoCabManual" data-tempo="ms" inputmode="numeric" value="${F('tempoCabManual')}" placeholder="auto (00:00)" ${ro}></div>
           <div class="field"><label>Velocidade de leitura</label><input type="text" value="${prog.wpm || 170} palavras/min" disabled></div>
         </div>
       </div></div>
@@ -2329,8 +2352,8 @@ async function viewProgramas() {
     ${S.programs.map(p => `<tr data-id="${p.id}">
       <td><input type="text" data-k="name" value="${esc(p.name)}" ${canEdit ? '' : 'disabled'}></td>
       <td style="width:80px"><input type="text" data-k="sigla" value="${esc(p.sigla)}" ${canEdit ? '' : 'disabled'}></td>
-      <td style="width:110px"><input type="text" class="mono" data-k="inicio" value="${esc(p.inicio)}" placeholder="hh:mm:ss" ${canEdit ? '' : 'disabled'}></td>
-      <td style="width:110px"><input type="text" class="mono" data-k="duracao" value="${esc(p.duracao)}" placeholder="hh:mm:ss" ${canEdit ? '' : 'disabled'}></td>
+      <td style="width:110px"><input type="text" class="mono" data-k="inicio" data-tempo="hms" inputmode="numeric" value="${esc(p.inicio)}" placeholder="00:00:00" ${canEdit ? '' : 'disabled'}></td>
+      <td style="width:110px"><input type="text" class="mono" data-k="duracao" data-tempo="hms" inputmode="numeric" value="${esc(p.duracao)}" placeholder="00:00:00" ${canEdit ? '' : 'disabled'}></td>
       <td style="width:90px"><input type="number" data-k="wpm" value="${esc(p.wpm)}" min="80" max="300" ${canEdit ? '' : 'disabled'}></td>
       <td><input type="text" data-k="apresentadores" value="${esc(p.apresentadores)}" ${canEdit ? '' : 'disabled'}></td>
       <td><input type="checkbox" data-k="ativo" ${p.ativo !== false ? 'checked' : ''} ${canEdit ? '' : 'disabled'}></td>
@@ -2339,8 +2362,8 @@ async function viewProgramas() {
     ${canEdit ? `<div class="card"><div class="pad"><h3 style="margin-top:0">Novo telejornal</h3><form id="np" class="row4">
       <div class="field"><label>Nome</label><input type="text" name="name" required></div>
       <div class="field"><label>Sigla</label><input type="text" name="sigla"></div>
-      <div class="field"><label>Início</label><input type="text" class="mono" name="inicio" value="12:00:00"></div>
-      <div class="field"><label>Duração</label><input type="text" class="mono" name="duracao" value="00:30:00"></div>
+      <div class="field"><label>Início</label><input type="text" class="mono" name="inicio" data-tempo="hms" inputmode="numeric" placeholder="00:00:00" value="12:00:00"></div>
+      <div class="field"><label>Duração</label><input type="text" class="mono" name="duracao" data-tempo="hms" inputmode="numeric" placeholder="00:00:00" value="00:30:00"></div>
       <div><button class="btn primary">Adicionar</button></div></form></div></div>` : ''}
   </div>`;
   $('#main').onclick = async (e) => {
