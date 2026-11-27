@@ -15,7 +15,7 @@ const SESSION_DAYS = 7;
 const LOCK_MS = 60 * 1000;
 
 // ---------------------------------------------------------------- banco
-let db = { orgs: [], users: [], sessions: [], programs: [], pautas: [], rundowns: [], items: [], logs: [] };
+let db = { orgs: [], users: [], sessions: [], programs: [], pautas: [], rundowns: [], items: [], logs: [], capas: [] };
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (fs.existsSync(DB_FILE)) {
   db = Object.assign(db, JSON.parse(fs.readFileSync(DB_FILE, 'utf8')));
@@ -304,6 +304,25 @@ route('PUT', '/api/org/equipe', async (req, res, { user, body }) => {
     .map(f => ({ nome: String((f && f.nome) || '').trim().slice(0, 80), funcao: String((f && f.funcao) || '').trim().slice(0, 80) })).filter(f => f.nome && f.funcao);
   log(user.orgId, user, 'equipe', 'Atualizou o cadastro de funcionários'); save();
   send(res, 200, org);
+});
+
+// --- capa da pauta: rascunho particular de cada login, um por data
+const minhasCapas = (user) => db.capas.filter(c => c.userId === user.id);
+route('GET', '/api/me/capas/ultima', async (req, res, { user }) => {
+  const u = minhasCapas(user).sort((a, b) => b.at - a.at)[0];
+  send(res, 200, u ? { data: u.data, at: u.at } : null);
+});
+route('GET', '/api/me/capas/:data', async (req, res, { user, params }) => {
+  const c = minhasCapas(user).find(x => x.data === params.data);
+  send(res, 200, c ? { at: c.at, conteudo: c.conteudo } : null);
+});
+route('PUT', '/api/me/capas/:data', async (req, res, { user, params, body }) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(params.data) || !body.conteudo || !Array.isArray(body.conteudo.itens)) return err(res, 400, 'Capa inválida.');
+  if (JSON.stringify(body.conteudo).length > 100000) return err(res, 400, 'Capa muito grande.');
+  let c = minhasCapas(user).find(x => x.data === params.data);
+  if (!c) db.capas.push(c = { userId: user.id, data: params.data });
+  Object.assign(c, { at: Number(body.at) || Date.now(), conteudo: body.conteudo });
+  save(); send(res, 200, { ok: true });
 });
 
 route('PUT', '/api/me/password', async (req, res, { user, body }) => {

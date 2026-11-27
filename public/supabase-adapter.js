@@ -155,6 +155,20 @@ window.createSupabaseAdapter = function (sb) {
     check(await sb.rpc('set_funcionarios', { p_lista: b.funcionarios || [] }));
     return fromDb(check(await sb.from('orgs').select('*').eq('id', me.orgId).single()));
   });
+  // capa da pauta: rascunho particular de cada login, um por data
+  const capaDb = (res) => { if (res.error) fail(res.error.message); return res.data; };
+  on('GET', '/api/me/capas/ultima', async () => {
+    const r = capaDb(await sb.from('capas').select('data, salvo_em').eq('user_id', me.id).order('salvo_em', { ascending: false }).limit(1));
+    return r.length ? { data: r[0].data, at: Number(r[0].salvo_em) } : null;
+  });
+  on('GET', '/api/me/capas/:data', async (b, p) => {
+    const r = capaDb(await sb.from('capas').select('conteudo, salvo_em').eq('user_id', me.id).eq('data', p.data).maybeSingle());
+    return r ? { at: Number(r.salvo_em), conteudo: r.conteudo } : null;
+  });
+  on('PUT', '/api/me/capas/:data', async (b, p) => {
+    capaDb(await sb.from('capas').upsert({ user_id: me.id, data: p.data, conteudo: b.conteudo, salvo_em: b.at }, { onConflict: 'user_id,data' }));
+    return { ok: true };
+  });
   on('PUT', '/api/me/password', async (b) => {
     const { error: e1 } = await sb.auth.signInWithPassword({ email: me.email, password: b.current || '' });
     if (e1) fail('Senha atual incorreta.');
