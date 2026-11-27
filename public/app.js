@@ -860,7 +860,7 @@ document.addEventListener('keydown', (e) => {
 // Espelho: Enter sobre a linha da retranca abre o prompter nela, já rolando na velocidade média de leitura
 document.addEventListener('keydown', async (e) => {
   if (e.key !== 'Enter' || e.repeat || e.ctrlKey || e.metaKey || e.altKey || S.view !== 'espelho' || !S.rundown) return;
-  if (e.target.closest('input, textarea, select, button, a') || $('.modal-bg, #prompter, #onair')) return;
+  if (e.target.closest('input, textarea, select, button, a') || $('.modal-bg, #prompter, #onair, #saida')) return;
   const tr = e.target.closest('tr.row'); const id = tr ? tr.dataset.id : S.selItem;
   if (!id) return;
   e.preventDefault();
@@ -920,7 +920,7 @@ async function loadRundown(create) {
   S.rundown = await api('GET', `/api/rundowns?programId=${S.rd.programId}&data=${S.rd.date}${create ? '&create=1' : ''}`);
 }
 async function viewEspelho() {
-  S.selItem = null;
+  S.selItem = null; S.leitura = null; S.ultimoClique = null;
   $('#main').innerHTML = `
   <div class="workspace ws-espelho">
     <div class="rd-toolbar">
@@ -978,6 +978,7 @@ function renderRundown() {
       <button class="btn sm" data-a="break" ${closed ? 'disabled' : ''}>+ Intervalo</button>
       <button class="btn sm onair-btn ${rd.status === 'no_ar' ? 'live' : ''}" data-a="onair" title="Modo no ar: o apresentador dá OK em cada retranca exibida">● No ar</button>
       <button class="btn sm" data-a="prompter">Prompter</button>
+      <button class="btn sm" data-a="saida" title="Saída para os operadores acompanharem o espelho em tela cheia">⛶ Tela cheia</button>
       <button class="btn sm" data-a="print">Imprimir</button>
       ${S.perms.approveRundown ? `<select class="btn sm" data-a="status" aria-label="Status do espelho" style="width:auto">${opts(RD_STATUS, rd.status)}</select>` : ''}
     </div>`;
@@ -1004,7 +1005,16 @@ function renderRundown() {
   }).join('');
   grid.innerHTML = `<table class="grid"><thead><tr><th></th><th>Pág</th><th>Retranca</th><th>Tipo</th><th>Apres.</th><th>Repórter</th><th>Editor</th><th style="text-align:right">Cab</th><th style="text-align:right">VT</th><th style="text-align:right">Total</th><th style="text-align:right">No ar</th><th style="text-align:right">Acum.</th><th>Status</th></tr></thead><tbody>${body}</tbody></table>
     ${rd.items.length ? '' : '<div class="empty">Espelho vazio.</div>'}`;
-  grid.onclick = async (e) => { const tr = e.target.closest('tr.row'); if (tr) selectItem(tr.dataset.id); };
+  // o primeiro clique redesenha a tabela, por isso o duplo clique é contado aqui, pelo id da linha
+  grid.onclick = async (e) => {
+    const tr = e.target.closest('tr.row'); if (!tr) return;
+    const id = tr.dataset.id, agora = Date.now();
+    const duplo = S.ultimoClique && S.ultimoClique.id === id && agora - S.ultimoClique.quando < 500;
+    S.ultimoClique = duplo ? null : { id, quando: agora };
+    if (duplo) S.leitura = id; else if (S.leitura !== id) S.leitura = null;
+    await selectItem(id);
+    if (duplo && window.matchMedia('(max-width: 1100px)').matches) $('#story').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
   // arrastar e soltar
   let dragId = null;
   $$('tr.row', grid).forEach(tr => {
@@ -1033,6 +1043,7 @@ async function rundownAction(a) {
     if (a === 'pauta') pickPauta();
     if (a === 'print') printRundown();
     if (a === 'prompter') prompter();
+    if (a === 'saida') { flushItem(); abrirSaida(); }   // sem esperar: a tela cheia exige o clique
     if (a === 'onair') { await flushItem(); openOnAir(); }
   } catch (e) { toast(e.message, true); }
 }
@@ -1062,10 +1073,39 @@ async function selectItem(id, focusRetranca) {
 }
 const curItem = () => S.rundown && S.rundown.items.find(i => i.id === S.selItem);
 
+// caixa de leitura ao lado do espelho, para o apresentador que não quer usar o prompter
+const LEITURA_TAM = [18, 22, 26, 32, 40];
+function renderLeitura(el, it) {
+  const linha = computeRundown(S.rundown).rows.find(r => r.it.id === it.id);
+  let tam = 1; try { const v = localStorage.getItem('redacao:leitura-tam'); if (v !== null && LEITURA_TAM[v]) tam = +v; } catch { /* sem armazenamento */ }
+  const marcado = (t) => esc(t).replace(/\[([^\]]*)\]/g, '<span class="lt-marca">[$1]</span>');
+  const parte = (titulo, t, cls = '') => String(t || '').trim() ? `<section class="lt-parte ${cls}"><h3>${titulo}</h3><div>${marcado(t)}</div></section>` : '';
+  const topo = $('.lt-corpo', el), rolagem = topo && topo.dataset.id === it.id ? topo.scrollTop : 0;
+  const texto = parte('Cabeça', it.cabeca, 'lt-lido') + parte('VT / off / nota', it.texto, READ_TYPES.includes(it.tipo) ? 'lt-lido' : '') + parte('Deixa', it.deixa) + parte('Créditos (GC)', it.gc) + parte('Observações', it.obs);
+  el.innerHTML = `
+    <div class="pane-h"><h2>Leitura</h2><span class="hint">${linha.pagina} · ${esc(it.tipo)} · ${fmtDur(linha.total)}</span><div style="flex:1"></div>
+      <div class="formbar"><button class="btn sm" data-lt="-1" aria-label="Diminuir letra" ${tam ? '' : 'disabled'}>A−</button><button class="btn sm" data-lt="1" aria-label="Aumentar letra" ${tam < LEITURA_TAM.length - 1 ? '' : 'disabled'}>A+</button>
+        <button class="btn sm" data-lt="prompter">Prompter</button><button class="btn sm primary" data-lt="lauda">Voltar à lauda</button></div></div>
+    <div class="pane-b lt-corpo" data-id="${it.id}" style="font-size:${LEITURA_TAM[tam]}px">
+      <div class="lt-retr">${esc(it.retranca)}</div>
+      <div class="lt-quem">${[['Apresentador', it.apresentador], ['Repórter', it.reporter]].filter(x => x[1]).map(([r, v]) => `${r}: <b>${esc(v)}</b>`).join(' · ')}</div>
+      ${texto || '<p class="lt-vazio">Esta retranca ainda não tem texto.</p>'}
+    </div>`;
+  $('.lt-corpo', el).scrollTop = rolagem;
+  $$('[data-lt]', el).forEach(b => b.onclick = async () => {
+    const a = b.dataset.lt;
+    if (a === 'lauda') { S.leitura = null; return renderStory(); }
+    if (a === 'prompter') { await flushItem(); return prompter(it.id); }
+    try { localStorage.setItem('redacao:leitura-tam', tam + Number(a)); } catch { /* sem armazenamento */ }
+    renderLeitura(el, it);
+  });
+}
+
 function renderStory() {
   const el = $('#story'); if (!el) return;
   const it = curItem();
   if (!it) { el.innerHTML = `<div class="pane-h"><h2>Lauda</h2></div><div class="empty">Selecione uma retranca no espelho para editar a lauda.<br><br><span class="hint">Texto entre [colchetes] é instrução e não conta no tempo de leitura.</span></div>`; return; }
+  if (S.leitura === it.id && it.tipo !== 'INTERVALO') return renderLeitura(el, it);
   const rd = S.rundown; const prog = rd.program;
   const closed = rd.status === 'fechado' && !S.perms.approveRundown;
   const lockedBy = it.lock && !it.lock.mine ? it.lock.name : null;
